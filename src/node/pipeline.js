@@ -260,6 +260,22 @@ export async function saveItem(key, { mode, tags } = {}) {
 
   try {
     let result
+    if (wantMode === 'builtin') {
+      // The built-in library: the entry and its PDF already live in the
+      // plugin's own shadow store, so "saving" means confirming the item into
+      // the library. No external app, no network — works offline.
+      const updated = await store.patchItem(key, {
+        state: 'saved',
+        saveMode: 'builtin',
+        savedAt: Date.now(),
+        error: null,
+        updatedAt: Date.now(),
+      })
+      sse.emitItem(updated)
+      await finishTask(task, 'done', current.pdf?.path ? '已保存到内置文献库' : '已保存到内置文献库（无全文）')
+      return updated
+    }
+
     if (wantMode === 'dir') {
       let buffer = null
       if (current.pdf?.path) {

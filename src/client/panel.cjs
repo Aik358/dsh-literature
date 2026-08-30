@@ -88,7 +88,15 @@ function ItemCard({ item }) {
     actions.push(h(Button, { key: 'retry', variant: 'primary', onClick: () => store.retryItem(item.key), loading: busy }, t('action.retry')))
   } else if (item.state === 'saved') {
     actions.push(h(Button, { key: 'read', variant: 'primary', onClick: () => store.selectItem(item.key, 'reader') }, t('action.read')))
-    if (item.zotero?.key) {
+    if (item.saveMode === 'builtin') {
+      // Saved into the plugin's own library — Zotero and the filesystem are
+      // optional exports from here.
+      actions.push(
+        h(Button, { key: 'tozotero', onClick: () => store.saveItem(item.key, { mode: 'zotero' }) }, t('action.exportToLibrary')),
+        h(Button, { key: 'todir', onClick: () => store.saveItem(item.key, { mode: 'dir' }) }, t('action.exportToDir')),
+      )
+    }
+    if (item.saveMode === 'zotero' && item.zotero?.key) {
       actions.push(
         h(Button, { key: 'zotero', onClick: () => window.open(`zotero://select/library/items/${item.zotero.key}`, '_blank') }, t('action.openInZotero')),
       )
@@ -102,6 +110,15 @@ function ItemCard({ item }) {
 
   const title = item.record?.title || item.title || item.display || item.rawValue || 'Untitled'
 
+  const savedBadge =
+    item.state === 'saved'
+      ? item.saveMode === 'builtin'
+        ? h(Badge, { tone: 'success' }, t('badge.builtin'))
+        : item.saveMode === 'zotero'
+          ? h(Badge, { tone: 'success' }, t('badge.library'))
+          : h(Badge, { tone: 'success' }, t('badge.dir'))
+      : null
+
   return h(
     'div',
     { className: 'zt-card', 'data-state': item.state, onClick: () => item.pdf?.path && store.selectItem(item.key, 'reader') },
@@ -110,7 +127,7 @@ function ItemCard({ item }) {
         h(Badge, { tone }, t('state.' + item.state)),
         item.state === 'duplicate' ? h(Badge, { tone: 'warn' }, t('state.duplicate')) : null,
       ),
-      item.state === 'saved' && item.saveMode === 'zotero' ? h(Badge, { tone: 'success' }, '本地库') : item.state === 'saved' ? h(Badge, { tone: 'success' }, 'Dir') : null,
+      savedBadge,
     ),
     h('h4', { className: 'zt-card-title' }, title),
     h('p', { className: 'zt-card-meta' }, metaLine(item)),
@@ -169,6 +186,14 @@ function PanelHeader({ onClose, embedded = false }) {
   const state = useStore()
   const dragRef = useRef(null)
   const zoteroRunning = state.zotero?.running === true
+  // The library-status badge only matters in Zotero-export mode; the built-in
+  // library and directory mode work with nothing external running.
+  const statusBadge =
+    state.config?.saveMode === 'zotero'
+      ? zoteroRunning
+        ? h(Badge, { tone: 'success' }, t('status.running'))
+        : h(Badge, { tone: 'warn' }, t('status.down'))
+      : h(Badge, { tone: 'info' }, t('badge.mode.' + (state.config?.saveMode ?? 'builtin')))
 
   const onDragStart = embedded ? null : (e) => {
     if (e.target.closest('button')) return
@@ -202,9 +227,7 @@ function PanelHeader({ onClose, embedded = false }) {
   return h(
     'div',
     { className: 'zt-header', ref: dragRef, style, onMouseDown: onDragStart },
-    h('div', { className: 'zt-row', style: { gap: 4 } },
-      zoteroRunning ? h(Badge, { tone: 'success' }, t('status.running')) : h(Badge, { tone: 'warn' }, t('status.down')),
-    ),
+    h('div', { className: 'zt-row', style: { gap: 4 } }, statusBadge),
     h('span', { className: 'zt-title', title: t('panelTitle') }, t('panelTitle')),
     h(IconButton, { title: t('settingsTooltip'), onClick: () => store.setView(state.view === 'settings' ? 'list' : 'settings') }, h(Icon.Settings, { size: 16 })),
     h(IconButton, { title: t('close'), onClick: onClose }, h(Icon.Close, { size: 16 })),
@@ -423,6 +446,8 @@ function Panel({ onClose, embedded = false }) {
   if (!state.open && !embedded) return null
 
   const zoteroRunning = state.zotero?.running === true
+  // Warn only when the current mode actually depends on the external app.
+  const needZotero = state.config?.saveMode === 'zotero'
 
   return h(
     'div',
@@ -432,7 +457,7 @@ function Panel({ onClose, embedded = false }) {
     },
     h(PanelHeader, { onClose, embedded }),
     !state.loaded && state.loadError ? h('div', { className: 'zt-banner' }, t('banner.offline')) : null,
-    !zoteroRunning ? h('div', { className: 'zt-banner' }, t('banner.zoteroDown')) : null,
+    needZotero && !zoteroRunning ? h('div', { className: 'zt-banner' }, t('banner.zoteroDown')) : null,
     h('div', { className: 'zt-body' },
       state.view === 'list' ? h(SearchBar, { key: 'search' }) : null,
       h(PanelBody, { key: 'body' }),

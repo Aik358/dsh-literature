@@ -80,6 +80,7 @@ function SettingsPage({ close }) {
       h(
         'select',
         { value: form.saveMode, onChange: (e) => set({ saveMode: e.target.value }) },
+        h('option', { value: 'builtin' }, t('settings.saveModeBuiltin')),
         h('option', { value: 'zotero' }, t('settings.saveModeZotero')),
         h('option', { value: 'dir' }, t('settings.saveModeDir')),
       ),

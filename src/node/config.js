@@ -20,8 +20,10 @@ export const STORE_PATH = join(STORE_DIR, 'store.json')
 
 const DEFAULTS = {
   version: 1,
-  /** 'zotero' writes through the Connector API; 'dir' exports to `dirPath`. */
-  saveMode: 'zotero',
+  /** 'builtin' keeps everything inside the plugin's own shadow library (no
+   *  external app needed); 'zotero' writes through the Zotero-ecosystem
+   *  Connector API (requires the app running); 'dir' exports to `dirPath`. */
+  saveMode: 'builtin',
   dirPath: '',
   /** Collection names the user wants new items to land in. Advisory only — the
    *  Connector API saves into whatever the Zotero pane currently has selected. */
