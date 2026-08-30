@@ -57,6 +57,11 @@ const DEFAULTS = {
   /** Watched folder: new PDFs here are auto-imported into the built-in library. */
   importDir: '',
   watchImport: false,
+  /** User-configured custom download sources (mirrors / institutional proxies).
+   *  Each: { id, label, urlTemplate, headers?, enabled, order }. URL templates
+   *  may use {doi} {arxiv} {isbn} {title} {url}. These are the user's own
+   *  configuration — the plugin never ships any such source itself. */
+  customSources: [],
 }
 
 function merge(base, patch) {

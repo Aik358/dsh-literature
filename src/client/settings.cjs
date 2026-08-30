@@ -58,6 +58,45 @@ function SettingsPage({ close }) {
     }
   }
 
+  const [addingSource, setAddingSource] = React.useState(false)
+  const [draftLabel, setDraftLabel] = React.useState('')
+  const [draftTemplate, setDraftTemplate] = React.useState('')
+  const [draftHeaders, setDraftHeaders] = React.useState('')
+
+  const parseHeaders = (text) => {
+    const out = {}
+    for (const line of String(text || '').split(/\r?\n/)) {
+      const i = line.indexOf(':')
+      if (i > 0) out[line.slice(0, i).trim()] = line.slice(i + 1).trim()
+    }
+    return out
+  }
+  const setSource = (idx, patch) => {
+    const list = (form.customSources ?? []).slice()
+    list[idx] = { ...list[idx], ...patch }
+    set({ customSources: list })
+  }
+  const removeSource = (idx) => {
+    set({ customSources: (form.customSources ?? []).filter((_, i) => i !== idx) })
+  }
+  const addSource = () => setAddingSource(true)
+  const commitSource = () => {
+    const src = {
+      id: `src_${Date.now().toString(36)}`,
+      label: draftLabel,
+      urlTemplate: draftTemplate,
+      headers: parseHeaders(draftHeaders),
+      enabled: true,
+      order: 100 + (form.customSources ?? []).length,
+    }
+    if (!src.label || !src.urlTemplate) return
+    set({ customSources: [...(form.customSources ?? []), src] })
+    setDraftLabel('')
+    setDraftTemplate('')
+    setDraftHeaders('')
+    setAddingSource(false)
+  }
+
   const toggle = (key) => (e) => set({ [key]: e.target.checked })
   const number = (key, fallback, min, max) => (e) => {
     const v = Number(e.target.value)
@@ -220,6 +259,55 @@ function SettingsPage({ close }) {
         t('settings.watchImport'),
       ),
     ),
+
+    h('div', { style: { fontSize: 13, fontWeight: 500, color: 'var(--dsw-alias-label-secondary, #666)', margin: '16px 0 8px' } }, t('settings.customSources')),
+    h('div', { className: 'zt-hint', style: { marginBottom: 8 } }, t('settings.customSourcesHint')),
+    h('div', { className: 'zt-hint', style: { marginBottom: 8, color: 'var(--dsw-alias-state-warn-primary, #b06000)' } }, t('settings.customSourcesCompliance')),
+    (form.customSources ?? []).map((src, idx) =>
+      h('div', { key: src.id, className: 'zt-row', style: { gap: 8, marginBottom: 6 } },
+        h('input', {
+          type: 'checkbox',
+          checked: src.enabled !== false,
+          title: t('settings.sourceEnabled'),
+          onChange: (e) => setSource(idx, { enabled: e.target.checked }),
+        }),
+        h('input', {
+          className: 'zt-input', style: { flex: 0.35, minWidth: 0 },
+          value: src.label ?? '',
+          placeholder: t('settings.sourceLabel'),
+          onChange: (e) => setSource(idx, { label: e.target.value }),
+        }),
+        h('input', {
+          className: 'zt-input', style: { flex: 1, minWidth: 0 },
+          value: src.urlTemplate ?? '',
+          placeholder: 'https://mirror.example/{doi}',
+          onChange: (e) => setSource(idx, { urlTemplate: e.target.value }),
+        }),
+        h(Button, { variant: 'ghost', onClick: () => removeSource(idx) }, '×'),
+      ),
+    ),
+    h('div', { className: 'zt-row', style: { gap: 8, marginBottom: 4 } },
+      h(Button, { onClick: addSource }, t('settings.addSource')),
+    ),
+    addingSource
+      ? h('div', { className: 'zt-field', style: { marginTop: 8 } },
+          h('label', null, t('settings.sourceLabel')),
+          h('input', { className: 'zt-input', value: draftLabel, placeholder: '校内镜像', onChange: (e) => setDraftLabel(e.target.value) }),
+          h('label', null, t('settings.sourceUrlTemplate')),
+          h('input', { className: 'zt-input', value: draftTemplate, placeholder: 'https://mirror.example/{doi}', onChange: (e) => setDraftTemplate(e.target.value) }),
+          h('label', null, t('settings.sourceHeaders')),
+          h('textarea', {
+            className: 'zt-input', rows: 3, style: { height: 'auto', padding: '8px', fontFamily: 'monospace', fontSize: 12 },
+            value: draftHeaders,
+            placeholder: 'Authorization: Bearer xxx\nCookie: session=abc',
+            onChange: (e) => setDraftHeaders(e.target.value),
+          }),
+          h('div', { className: 'zt-row', style: { marginTop: 8 } },
+            h(Button, { variant: 'primary', onClick: commitSource }, t('settings.addSourceConfirm')),
+            h(Button, { variant: 'ghost', onClick: () => setAddingSource(false) }, t('action.cancel')),
+          ),
+        )
+      : null,
 
     h('details', { className: 'zt-advanced' },
       h('summary', null, t('settings.advanced')),

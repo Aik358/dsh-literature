@@ -182,7 +182,7 @@ export async function fetchItemPdf(key) {
     const result = await withRetry(
       (attempt) => {
         if (attempt > 1) sse.emitTask({ id: task.id, state: 'running', progress: 10, message: `第 ${attempt} 次尝试` , updatedAt: Date.now()})
-        return fetchPdf(current.record, { timeoutMs: config.fetchTimeoutMs, unpaywallEmail: config.unpaywallEmail })
+        return fetchPdf(current.record, { timeoutMs: config.fetchTimeoutMs, unpaywallEmail: config.unpaywallEmail, customSources: config.customSources })
       },
       { ...config.retry, label: `fetch ${key}` },
     )

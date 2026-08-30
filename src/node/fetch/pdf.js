@@ -23,12 +23,39 @@ function looksLikePdf(buffer) {
  * paywalled source on the user's behalf — only publisher-advertised open
  * access locations are used.
  */
-async function candidates(record, { unpaywallEmail } = {}) {
+/** Fills {doi} {arxiv} {isbn} {title} {url} in a user-supplied URL template. */
+export function renderSourceTemplate(template, record) {
+  if (!template || !/^https?:\/\//i.test(String(template))) return ''
+  const vars = {
+    doi: record.doi ? encodeURIComponent(record.doi) : '',
+    arxiv: record.arxiv ? encodeURIComponent(record.arxiv) : '',
+    isbn: record.isbn ? encodeURIComponent(record.isbn) : '',
+    title: record.title ? encodeURIComponent(record.title) : '',
+    url: record.url ? encodeURIComponent(record.url) : '',
+  }
+  // A template referencing a variable the record does not carry is unusable —
+  // silently blanking it would produce a broken URL.
+  for (const [k, v] of Object.entries(vars)) {
+    if (!v && String(template).includes(`{${k}}`)) return ''
+  }
+  // A template referencing a variable the record does not carry is unusable —
+  // silently blanking it would produce a broken URL.
+  for (const [k, v] of Object.entries(vars)) {
+    if (!v && String(template).includes(`{${k}}`)) return ''
+  }
+  let out = String(template)
+  for (const [k, v] of Object.entries(vars)) out = out.split(`{${k}}`).join(v)
+  // A leftover placeholder or a non-absolute result is not usable.
+  if (out.includes('{') || !/^https?:\/\//i.test(out)) return ''
+  return out
+}
+
+async function candidates(record, { unpaywallEmail, customSources = [] } = {}) {
   const out = []
 
-  const push = (url, source, kind = 'pdf') => {
+  const push = (url, source, kind = 'pdf', headers) => {
     if (!url) return
-    out.push({ url: String(url), source, kind })
+    out.push({ url: String(url), source, kind, headers })
   }
 
   if (record.arxiv) {
@@ -82,6 +109,14 @@ async function candidates(record, { unpaywallEmail } = {}) {
     }
   }
 
+  // User-configured custom sources (mirrors / institutional proxies), appended
+  // after the official open-access chain so they act as fallbacks. Ordering is
+  // the user's `order` field; the plugin never ships such sources itself.
+  for (const src of [...customSources].filter((x) => x && x.enabled).sort((a, b) => (a.order ?? 100) - (b.order ?? 100))) {
+    const url = renderSourceTemplate(src.urlTemplate, record)
+    if (url) push(url, src.label || src.id || 'custom', 'pdf', src.headers)
+  }
+
   // Drop duplicates while preserving order.
   const seen = new Set()
   return out.filter((c) => {
@@ -124,8 +159,8 @@ const LOGIN_HINT =
  * @returns {Promise<{buffer: Buffer, url: string, source: string}>}
  * @throws {PdfFailure} with a code the UI turns into a specific message
  */
-export async function fetchPdf(record, { timeoutMs = 30000, unpaywallEmail = '' } = {}) {
-  const list = await candidates(record, { unpaywallEmail })
+export async function fetchPdf(record, { timeoutMs = 30000, unpaywallEmail = '', customSources = [] } = {}) {
+  const list = await candidates(record, { unpaywallEmail, customSources })
   if (!list.length) {
     // Books, chapters, reports and theses rarely have OA full text; frame the
     // failure as a login/institutional request rather than a generic no-source.
@@ -146,6 +181,7 @@ export async function fetchPdf(record, { timeoutMs = 30000, unpaywallEmail = '' 
       const { buffer, contentType, finalUrl } = await httpGetBuffer(cand.url, {
         timeoutMs,
         accept: 'application/pdf,*/*;q=0.8',
+        ...(cand.headers && typeof cand.headers === 'object' ? { headers: cand.headers } : {}),
       })
 
       if (looksLikePdf(buffer)) {
