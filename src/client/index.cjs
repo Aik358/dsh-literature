@@ -110,29 +110,56 @@ function apply(ctx) {
     'dsh-literature: settings page',
   )
 
-  const bsbNow = hasBetterSidebar(ctx)
-  if (bsbNow) {
-    ctx.effect(registerBetterSidebarTab(ctx), 'dsh-literature: better-sidebar tab')
-    console.log('[dsh-literature] better-sidebar detected — entry lives in its right sidebar')
-  } else {
-    ctx.effect(registerFooterEntry(slots), 'dsh-literature: sidebar entry')
-    ctx.effect(panelSurface, 'dsh-literature: overlay panel')
+  /**
+   * Entry placement.
+   *
+   * `better-sidebar` is a heavy client bundle that can materialize and apply
+   * well after us, so presence is re-checked on a poll: the moment its
+   * `ctx.betterSidebar` service shows up we migrate the footer entry into a
+   * right-sidebar tab and release the footer slot, keeping the DSH sidebar
+   * footer uncluttered.
+   */
+  const mode = store.getSnapshot().config?.entryMode ?? 'auto'
+  const preferBsb = mode !== 'footer'
+  let entryDisposer = null
+  let migrated = false
 
-    // The better-sidebar bundle may activate after us (e.g. a different load
-    // order). If it shows up within a few seconds, migrate the entry there so
-    // the sidebar footer stays uncluttered.
-    const timer = setTimeout(() => {
-      if (!hasBetterSidebar(ctx)) return
-      try {
-        ctx.dispose('dsh-literature: sidebar entry')
-        ctx.dispose('dsh-literature: overlay panel')
-      } catch {
-        /* already disposed */
+  const mountTab = () => {
+    if (migrated) return
+    migrated = true
+    try {
+      if (typeof entryDisposer === 'function') entryDisposer()
+    } catch (e) {
+      console.warn('[dsh-literature] footer entry release failed', e?.message)
+    }
+    ctx.effect(registerBetterSidebarTab(ctx), 'dsh-literature: better-sidebar tab')
+    console.log('[dsh-literature] entry mounted as better-sidebar tab')
+  }
+
+  const mountFooter = () => {
+    entryDisposer = ctx.effect(registerFooterEntry(slots), 'dsh-literature: sidebar entry')
+    ctx.effect(panelSurface, 'dsh-literature: overlay panel')
+  }
+
+  if (mode === 'hide') {
+    // No footer entry, no tab: access via the Settings page only.
+  } else if (preferBsb && hasBetterSidebar(ctx)) {
+    mountTab()
+  } else if (mode === 'footer') {
+    mountFooter()
+  } else {
+    // auto + not present yet: footer now, migrate when better-sidebar appears.
+    mountFooter()
+    const startedAt = Date.now()
+    const timer = setInterval(() => {
+      if (!migrated && hasBetterSidebar(ctx)) {
+        clearInterval(timer)
+        mountTab()
+        return
       }
-      ctx.effect(registerBetterSidebarTab(ctx), 'dsh-literature: better-sidebar tab')
-      console.log('[dsh-literature] better-sidebar appeared late — moved entry to its right sidebar')
-    }, 1500)
-    ctx.effect(() => () => clearTimeout(timer), 'dsh-literature: bsb migration timer')
+      if (Date.now() - startedAt > 12000) clearInterval(timer)
+    }, 400)
+    ctx.effect(() => () => clearInterval(timer), 'dsh-literature: bsb poll')
   }
 
   // SSE progress stream; disposed together with the fiber.

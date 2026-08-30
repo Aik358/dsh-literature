@@ -49,6 +49,9 @@ const DEFAULTS = {
   /** Panel geometry defaults (the client keeps live geometry in localStorage). */
   panelWidth: 380,
   readerFit: 'fit-width',
+  /** Entry placement: 'auto' (better-sidebar tab when available, else footer),
+   *  'footer' (always the sidebar footer button), 'hide' (settings page only). */
+  entryMode: 'auto',
 }
 
 function merge(base, patch) {

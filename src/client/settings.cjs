@@ -186,6 +186,15 @@ function SettingsPage({ close }) {
         onChange: number('panelWidth', 380, 300, 720),
       }),
     ),
+    h(Field, { label: t('settings.entryMode'), hint: t('settings.entryModeHint') },
+      h(
+        'select',
+        { value: form.entryMode ?? 'auto', onChange: (e) => set({ entryMode: e.target.value }) },
+        h('option', { value: 'auto' }, t('settings.entryAuto')),
+        h('option', { value: 'footer' }, t('settings.entryFooter')),
+        h('option', { value: 'hide' }, t('settings.entryHide')),
+      ),
+    ),
     h(Field, { label: t('settings.readerFit') },
       h(
         'select',
