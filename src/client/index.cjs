@@ -22,11 +22,46 @@ const { Icon } = require('./ui.cjs')
  * active we contribute a dedicated right-sidebar tab instead of crowding the
  * DSH sidebar footer with yet another button — the footer entry is only used
  * as the no-better-sidebar fallback.
+ *
+ * The client context is a service proxy whose exact read behaviour differs
+ * between the host and the browser runtime (the node-side `reflect.get`
+ * returns undefined for a missing service, but the browser face may throw or
+ * return a lazily-resolved proxy). So presence is probed through several
+ * access paths, and — the decisive test — a probe only counts when actually
+ * calling `registerTab` succeeds.
  */
-function hasBetterSidebar(ctx) {
+function probeBetterSidebar(ctx) {
+  const candidates = []
   try {
-    return !!ctx.betterSidebar
-  } catch {
+    if (ctx.betterSidebar) candidates.push(ctx.betterSidebar)
+  } catch (e) {
+    console.debug('[dsh-literature] ctx.betterSidebar read threw:', e?.message)
+  }
+  try {
+    const v = ctx.reflect?.get?.('betterSidebar', false) ?? ctx.reflect?.get?.('betterSidebar')
+    if (v) candidates.push(v)
+  } catch (e) {
+    console.debug('[dsh-literature] reflect.get threw:', e?.message)
+  }
+  try {
+    const v = ctx.get?.('betterSidebar')
+    if (v) candidates.push(v)
+  } catch (e) {
+    console.debug('[dsh-literature] ctx.get threw:', e?.message)
+  }
+  return candidates[0] ?? null
+}
+
+/** Attempts to mount the tab; returns true only when the service really works. */
+function tryMountBetterSidebarTab(ctx) {
+  try {
+    const bsb = probeBetterSidebar(ctx)
+    if (!bsb || typeof bsb.registerTab !== 'function') return false
+    ctx.effect(() => bsb.registerTab(betterSidebarTabDescriptor()), 'dsh-literature: better-sidebar tab')
+    console.log('[dsh-literature] better-sidebar tab mounted')
+    return true
+  } catch (e) {
+    console.warn('[dsh-literature] better-sidebar tab mount failed:', e?.message)
     return false
   }
 }
@@ -41,32 +76,35 @@ function registerFooterEntry(slots) {
     )
 }
 
+function betterSidebarTabDescriptor() {
+  return {
+    id: 'dsh-literature:library',
+    title: () => t('entry'),
+    icon: (size) => h(Icon.Panel, { size: size ?? 16 }),
+    single: true,
+    order: 30,
+    component: (props) => h(LibraryTab, props),
+    settings: {
+      pluginToggles: [
+        {
+          key: 'autoScanSession',
+          title: () => t('settings.autoScan'),
+          desc: () => t('settings.autoScanHint'),
+          type: 'switch',
+        },
+        {
+          key: 'autoResolve',
+          title: () => t('settings.autoResolve'),
+          desc: () => t('settings.autoResolveHint'),
+          type: 'switch',
+        },
+      ],
+    },
+  }
+}
+
 function registerBetterSidebarTab(ctx) {
-  return () =>
-    ctx.betterSidebar.registerTab({
-      id: 'dsh-literature:library',
-      title: () => t('entry'),
-      icon: (size) => h(Icon.Panel, { size: size ?? 16 }),
-      single: true,
-      order: 30,
-      component: (props) => h(LibraryTab, props),
-      settings: {
-        pluginToggles: [
-          {
-            key: 'autoScanSession',
-            title: () => t('settings.autoScan'),
-            desc: () => t('settings.autoScanHint'),
-            type: 'switch',
-          },
-          {
-            key: 'autoResolve',
-            title: () => t('settings.autoResolve'),
-            desc: () => t('settings.autoResolveHint'),
-            type: 'switch',
-          },
-        ],
-      },
-    })
+  return () => ctx.betterSidebar.registerTab(betterSidebarTabDescriptor())
 }
 
 function apply(ctx) {
@@ -114,10 +152,10 @@ function apply(ctx) {
    * Entry placement.
    *
    * `better-sidebar` is a heavy client bundle that can materialize and apply
-   * well after us, so presence is re-checked on a poll: the moment its
-   * `ctx.betterSidebar` service shows up we migrate the footer entry into a
-   * right-sidebar tab and release the footer slot, keeping the DSH sidebar
-   * footer uncluttered.
+   * well after us, so presence is re-checked on a poll — and the poll's probe
+   * is the mount itself (a tab only counts once `registerTab` succeeded).
+   * The moment it lands we migrate the footer entry into a right-sidebar tab
+   * and release the footer slot, keeping the DSH sidebar footer uncluttered.
    */
   const mode = store.getSnapshot().config?.entryMode ?? 'auto'
   const preferBsb = mode !== 'footer'
@@ -126,14 +164,15 @@ function apply(ctx) {
 
   const mountTab = () => {
     if (migrated) return
+    // The probe IS the mount: only a successful registerTab counts.
+    if (!tryMountBetterSidebarTab(ctx)) return
     migrated = true
     try {
       if (typeof entryDisposer === 'function') entryDisposer()
     } catch (e) {
       console.warn('[dsh-literature] footer entry release failed', e?.message)
     }
-    ctx.effect(registerBetterSidebarTab(ctx), 'dsh-literature: better-sidebar tab')
-    console.log('[dsh-literature] entry mounted as better-sidebar tab')
+    console.log('[dsh-literature] entry migrated to better-sidebar tab')
   }
 
   const mountFooter = () => {
@@ -143,8 +182,9 @@ function apply(ctx) {
 
   if (mode === 'hide') {
     // No footer entry, no tab: access via the Settings page only.
-  } else if (preferBsb && hasBetterSidebar(ctx)) {
-    mountTab()
+  } else if (preferBsb && tryMountBetterSidebarTab(ctx)) {
+    migrated = true
+    console.log('[dsh-literature] entry mounted as better-sidebar tab')
   } else if (mode === 'footer') {
     mountFooter()
   } else {
@@ -152,14 +192,26 @@ function apply(ctx) {
     mountFooter()
     const startedAt = Date.now()
     const timer = setInterval(() => {
-      if (!migrated && hasBetterSidebar(ctx)) {
+      if (migrated) {
         clearInterval(timer)
-        mountTab()
         return
       }
-      if (Date.now() - startedAt > 12000) clearInterval(timer)
-    }, 400)
+      mountTab()
+      if (Date.now() - startedAt > 30000) clearInterval(timer)
+    }, 200)
     ctx.effect(() => () => clearInterval(timer), 'dsh-literature: bsb poll')
+
+    // Some runtimes notify service provision; subscribe when the event exists.
+    try {
+      ctx.effect(() => {
+        const off = ctx.on('internal/service', (name) => {
+          if (name === 'betterSidebar' && !migrated) mountTab()
+        })
+        return typeof off === 'function' ? off : () => {}
+      }, 'dsh-literature: bsb service hook')
+    } catch {
+      /* event not supported on this runtime */
+    }
   }
 
   // SSE progress stream; disposed together with the fiber.

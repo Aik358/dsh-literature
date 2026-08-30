@@ -22,7 +22,7 @@ const check = (label, cond, detail) => {
   }
 }
 
-function makeHost({ withBsb = false, bsbLate = false } = {}) {
+function makeHost({ withBsb = false, bsbLate = false, gated = false } = {}) {
   const registered = { tabs: [], footerEntries: 0, overlay: 0 }
   const disposers = []
 
@@ -31,15 +31,13 @@ function makeHost({ withBsb = false, bsbLate = false } = {}) {
       const d = cb()
       if (key === 'sidebar.footer.action') registered.footerEntries += 1
       if (key === 'shell.overlay') registered.overlay += 1
-      if (key === 'settings.section') registered.overlay += 0
       return typeof d === 'function' ? d : () => {}
     },
     register: () => () => {},
   }
 
-  let bsb = withBsb
-    ? { registerTab: (d) => (registered.tabs.push(d), () => {}) }
-    : undefined
+  const bsbService = () => ({ registerTab: (d) => (registered.tabs.push(d), () => {}) })
+  let bsb = withBsb ? bsbService() : undefined
 
   const ctx = {
     effect: (fn) => {
@@ -51,11 +49,16 @@ function makeHost({ withBsb = false, bsbLate = false } = {}) {
     dispose: () => {},
     locale: { register: () => {}, snapshot: () => ({ locale: 'zh' }) },
     slots,
+    // `ctx.get` is the ungated optional lookup the client runner exposes.
+    get: (name) => (name === 'betterSidebar' ? bsb : undefined),
+    // Direct property reads are gated by the inject declaration on the real
+    // runtime: they THROW unless declared. `gated` emulates that.
     get betterSidebar() {
+      if (gated) throw new Error('service "betterSidebar" is not declared by your plugin')
       return bsb
     },
     __lateBsb: () => {
-      bsb = { registerTab: (d) => (registered.tabs.push(d), () => {}) }
+      bsb = bsbService()
     },
   }
 
@@ -142,10 +145,26 @@ console.log('apply:', typeof mod.apply, '| inject:', JSON.stringify(mod.inject))
     console.error(e?.stack)
     process.exit(1)
   }
-  // poll interval is 400ms; the service arrives at ~500ms → migrate by ~900ms
+  // poll interval is 200ms; the service arrives at ~500ms → migrate by ~700ms
   await new Promise((r) => setTimeout(r, 1500))
   check('S3 late-bsb: footer mounted first', registered.footerEntries === 1, registered)
   check('S3 late-bsb: migrated to tab', registered.tabs.length === 1, registered.tabs.map((t) => t.id))
+}
+
+// ---- scenario 4: client runner gates property reads (the real runtime) ----
+{
+  // The dynamic ctx throws on undeclared property reads but ctx.get() still
+  // resolves the service — exactly how dsh-cordis-client-runner behaves.
+  const { ctx, registered } = makeHost({ withBsb: true, gated: true })
+  try {
+    mod.apply(ctx)
+  } catch (e) {
+    console.error(e?.stack)
+    process.exit(1)
+  }
+  await new Promise((r) => setTimeout(r, 50))
+  check('S4 gated-bsb: tab mounts via ctx.get', registered.tabs.length === 1, registered.tabs.map((t) => t.id))
+  check('S4 gated-bsb: no footer entry', registered.footerEntries === 0, registered.footerEntries)
 }
 
 console.log(failures === 0 ? '\nAPPLY MATRIX ALL PASS' : `\n${failures} FAILED`)
