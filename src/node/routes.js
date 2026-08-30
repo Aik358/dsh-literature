@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
-import { isLoopbackRequest, writeJson, writeSseHead, parseRange, responseClosed } from './http.js'
+import { isLoopbackRequest, writeJson, writeSseHead, parseRange, responseClosed, readRawBody } from './http.js'
 import { loadConfig, saveConfig, PDF_DIR } from './config.js'
 import * as store from './store/db.js'
 import * as pipeline from './pipeline.js'
@@ -231,6 +231,23 @@ export async function handler(req, res) {
       const body = await readJsonBody(req)
       await pipeline.discardItem(String(body?.key ?? ''))
       writeJson(res, 200, { ok: true })
+      return
+    }
+
+    if (head === 'import' && methodOk(req, 'POST')) {
+      // Paywalled / needs-login fallback: the user downloads the PDF in their
+      // own browser and hands it to the panel. Body is the raw PDF bytes.
+      const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+      const key = url.searchParams.get('key') ?? ''
+      const filename = url.searchParams.get('filename') || 'imported.pdf'
+      const autoSave = url.searchParams.get('autoSave') !== '0'
+      if (!key) {
+        writeJson(res, 400, { error: 'missing key' })
+        return
+      }
+      const buffer = await readRawBody(req, 128 * 1024 * 1024)
+      const item = await pipeline.importPdf(key, buffer, { filename, autoSave })
+      writeJson(res, 200, { item })
       return
     }
 

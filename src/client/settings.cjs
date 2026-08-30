@@ -37,6 +37,10 @@ function SettingsPage({ close }) {
   const set = (patch) => setForm({ ...form, ...patch })
   const persist = async () => {
     await store.saveConfig(form)
+    // Applying the configured panel width immediately keeps the setting honest.
+    if (form.panelWidth && form.panelWidth !== (store.getSnapshot().geometry.width ?? 380)) {
+      store.setGeometry({ width: form.panelWidth })
+    }
     setSaved(true)
     setTimeout(() => setSaved(false), 1500)
   }
@@ -54,17 +58,24 @@ function SettingsPage({ close }) {
     }
   }
 
+  const toggle = (key) => (e) => set({ [key]: e.target.checked })
+  const number = (key, fallback, min, max) => (e) => {
+    const v = Number(e.target.value)
+    set({ [key]: Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : fallback })
+  }
+
   return h(
     'div',
     { className: 'zt-settings' },
     h('div', { className: 'zt-row', style: { marginBottom: 16, justifyContent: 'space-between' } },
       h('span', { style: { fontSize: 14, fontWeight: 500 } }, t('settings.title')),
       h('div', { className: 'zt-row' },
-        h(Button, { variant: 'primary', onClick: persist }, t('settings.saved')),
+        h(Button, { variant: 'primary', onClick: persist }, saved ? t('settings.saved') : t('action.confirm')),
         close ? h(Button, { variant: 'ghost', onClick: close }, t('back')) : null,
       ),
     ),
 
+    h('div', { style: { fontSize: 13, fontWeight: 500, color: 'var(--dsw-alias-label-secondary, #666)', margin: '16px 0 8px' } }, t('settings.sectionSave')),
     h(Field, { label: t('settings.saveMode') },
       h(
         'select',
@@ -73,7 +84,6 @@ function SettingsPage({ close }) {
         h('option', { value: 'dir' }, t('settings.saveModeDir')),
       ),
     ),
-
     form.saveMode === 'dir'
       ? h(Field, { label: t('settings.dirPath'), hint: t('settings.dirPathHint') },
           h('input', {
@@ -84,7 +94,6 @@ function SettingsPage({ close }) {
           }),
         )
       : null,
-
     h(Field, { label: t('settings.naming'), hint: t('settings.namingHint') },
       h('input', {
         type: 'text',
@@ -92,7 +101,28 @@ function SettingsPage({ close }) {
         onChange: (e) => set({ naming: e.target.value }),
       }),
     ),
-
+    h(Field, { label: t('settings.exportFormats'), hint: t('settings.exportFormatsHint') },
+      h('div', { className: 'zt-row', style: { gap: 16 } },
+        h('label', { className: 'zt-row', style: { cursor: 'pointer', gap: 6 } },
+          h('input', { type: 'checkbox', checked: (form.exportFormats ?? []).includes('csl-json'), onChange: (e) => {
+            const cur = new Set(form.exportFormats ?? [])
+            if (e.target.checked) cur.add('csl-json')
+            else cur.delete('csl-json')
+            set({ exportFormats: [...cur] })
+          } }),
+          'CSL-JSON',
+        ),
+        h('label', { className: 'zt-row', style: { cursor: 'pointer', gap: 6 } },
+          h('input', { type: 'checkbox', checked: (form.exportFormats ?? []).includes('ris'), onChange: (e) => {
+            const cur = new Set(form.exportFormats ?? [])
+            if (e.target.checked) cur.add('ris')
+            else cur.delete('ris')
+            set({ exportFormats: [...cur] })
+          } }),
+          'RIS',
+        ),
+      ),
+    ),
     h(Field, { label: t('settings.tags'), hint: t('settings.tagsHint') },
       h('input', {
         type: 'text',
@@ -101,6 +131,69 @@ function SettingsPage({ close }) {
       }),
     ),
 
+    h('div', { style: { fontSize: 13, fontWeight: 500, color: 'var(--dsw-alias-label-secondary, #666)', margin: '16px 0 8px' } }, t('settings.sectionDetect')),
+    h(Field, { label: t('settings.autoResolve'), hint: t('settings.autoResolveHint') },
+      h('label', { className: 'zt-row', style: { cursor: 'pointer', gap: 8 } },
+        h('input', { type: 'checkbox', checked: form.autoResolve !== false, onChange: toggle('autoResolve') }),
+        t('settings.autoResolve'),
+      ),
+    ),
+    h(Field, { label: t('settings.includeTitles'), hint: t('settings.includeTitlesHint') },
+      h('label', { className: 'zt-row', style: { cursor: 'pointer', gap: 8 } },
+        h('input', { type: 'checkbox', checked: form.includeTitles !== false, onChange: toggle('includeTitles') }),
+        t('settings.includeTitles'),
+      ),
+    ),
+    h(Field, { label: t('settings.autoScan'), hint: t('settings.autoScanHint') },
+      h('label', { className: 'zt-row', style: { cursor: 'pointer', gap: 8 } },
+        h('input', {
+          type: 'checkbox',
+          checked: !!form.autoScanSession,
+          onChange: toggle('autoScanSession'),
+        }),
+        t('settings.autoScan'),
+      ),
+    ),
+    h(Field, { label: t('settings.retryMaxAttempts') },
+      h('input', {
+        type: 'number', min: 1, max: 5,
+        value: form.retry?.maxAttempts ?? 3,
+        onChange: (e) => set({ retry: { ...(form.retry ?? {}), maxAttempts: Number(e.target.value) || 3 } }),
+      }),
+    ),
+    h(Field, { label: t('settings.fetchTimeoutMs') },
+      h('input', {
+        type: 'number', min: 10, max: 120,
+        value: (form.fetchTimeoutMs ?? 30000) / 1000,
+        onChange: (e) => set({ fetchTimeoutMs: (Number(e.target.value) || 30) * 1000 }),
+      }),
+    ),
+
+    h('div', { style: { fontSize: 13, fontWeight: 500, color: 'var(--dsw-alias-label-secondary, #666)', margin: '16px 0 8px' } }, t('settings.sectionBehavior')),
+    h(Field, { label: t('settings.conflictStrategy'), hint: t('settings.conflictStrategyHint') },
+      h(
+        'select',
+        { value: form.conflictStrategy ?? 'ask', onChange: (e) => set({ conflictStrategy: e.target.value }) },
+        h('option', { value: 'ask' }, t('settings.conflictAsk')),
+        h('option', { value: 'keep' }, t('settings.conflictKeep')),
+        h('option', { value: 'replace' }, t('settings.conflictReplace')),
+      ),
+    ),
+    h(Field, { label: t('settings.panelWidth'), hint: t('settings.panelWidthHint') },
+      h('input', {
+        type: 'number', min: 300, max: 720,
+        value: form.panelWidth ?? 380,
+        onChange: number('panelWidth', 380, 300, 720),
+      }),
+    ),
+    h(Field, { label: t('settings.readerFit') },
+      h(
+        'select',
+        { value: form.readerFit ?? 'fit-width', onChange: (e) => set({ readerFit: e.target.value }) },
+        h('option', { value: 'fit-width' }, t('settings.fitWidth')),
+        h('option', { value: 'fit-page' }, t('settings.fitPage')),
+      ),
+    ),
     h(Field, { label: t('settings.unpaywallEmail'), hint: t('settings.unpaywallEmailHint') },
       h('input', {
         type: 'text',
@@ -110,17 +203,7 @@ function SettingsPage({ close }) {
       }),
     ),
 
-    h(Field, { label: t('settings.autoScan'), hint: t('settings.autoScanHint') },
-      h('label', { className: 'zt-row', style: { cursor: 'pointer', gap: 8 } },
-        h('input', {
-          type: 'checkbox',
-          checked: !!form.autoScanSession,
-          onChange: (e) => set({ autoScanSession: e.target.checked }),
-        }),
-        t('settings.autoScan'),
-      ),
-    ),
-
+    h('div', { style: { fontSize: 13, fontWeight: 500, color: 'var(--dsw-alias-label-secondary, #666)', margin: '16px 0 8px' } }, t('settings.sectionLibrary')),
     h(Field, { label: t('settings.zoteroPort') },
       h('input', {
         type: 'number',
@@ -128,7 +211,6 @@ function SettingsPage({ close }) {
         onChange: (e) => set({ zoteroPort: Number(e.target.value) || 23119 }),
       }),
     ),
-
     h(Field, { label: t('settings.dataDir'), hint: t('settings.dataDirHint') },
       h('input', {
         type: 'text',

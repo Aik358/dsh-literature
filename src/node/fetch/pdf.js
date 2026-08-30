@@ -115,6 +115,10 @@ function extractPdfUrlFromHtml(html, baseUrl) {
   return null
 }
 
+/** Login / institutional-signal hints in a landing page. */
+const LOGIN_HINT =
+  /\bsign\s*in\b|\blog\s*in\b|login|登录|登錄|institutional\s*access|sso|okta|ezproxy|shibboleth|athens|your\s+institution/i
+
 /**
  * Downloads a full-text PDF for `record`.
  * @returns {Promise<{buffer: Buffer, url: string, source: string}>}
@@ -144,12 +148,18 @@ export async function fetchPdf(record, { timeoutMs = 30000, unpaywallEmail = '' 
 
       const isHtml = /text\/html|application\/xhtml/i.test(contentType)
       if (isHtml) {
-        const discovered = extractPdfUrlFromHtml(buffer.toString('utf8', 0, Math.min(buffer.length, 2 * 1024 * 1024)), finalUrl || cand.url)
+        const html = buffer.toString('utf8', 0, Math.min(buffer.length, 2 * 1024 * 1024))
+        const discovered = extractPdfUrlFromHtml(html, finalUrl || cand.url)
         if (discovered) {
           pending.unshift({ url: discovered, source: `${cand.source} (PDF 链接)`, kind: 'pdf' })
           continue
         }
-        failures.push({ url: cand.url, source: cand.source, reason: 'landing page, no discoverable PDF link' })
+        failures.push({
+          url: cand.url,
+          source: cand.source,
+          reason: 'landing page, no discoverable PDF link',
+          needsLogin: LOGIN_HINT.test(html),
+        })
         continue
       }
       failures.push({ url: cand.url, source: cand.source, reason: `unexpected content-type ${contentType || 'unknown'}` })
@@ -163,10 +173,16 @@ export async function fetchPdf(record, { timeoutMs = 30000, unpaywallEmail = '' 
   }
 
   const sawLandingOnly = failures.length > 0 && failures.every((f) => /landing page|404/.test(f.reason))
+  const needsLogin = failures.some((f) => f.needsLogin)
+  const code = needsLogin ? 'needs_login' : sawLandingOnly ? 'paywalled' : 'network'
   throw new PdfFailure(
-    sawLandingOnly ? '该文献没有开放获取全文（可能是付费墙）' : '所有全文来源均下载失败',
-    sawLandingOnly ? 'paywalled' : 'network',
-    { retryable: !sawLandingOnly, detail: failures },
+    code === 'needs_login'
+      ? '该文献需要登录或机构权限，请在浏览器登录后下载，再导入本地 PDF'
+      : sawLandingOnly
+        ? '该文献没有开放获取全文（可能是付费墙）'
+        : '所有全文来源均下载失败',
+    code,
+    { retryable: !sawLandingOnly && !needsLogin, detail: failures },
   )
 }
 

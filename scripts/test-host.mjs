@@ -167,7 +167,35 @@ const handler = prefix.handler
   check('resolve completes to a state (resolved or failed)', okShape, body.item?.state)
 }
 
-// 6. pdf route without a downloaded file → 404
+// 6. import: local PDF upload for paywalled papers
+{
+  // Grab an existing item key from the store.
+  const stateRes = makeRes()
+  const sreq = makeReq('GET', '/api/dsh-literature/state')
+  const sp = collect(stateRes)
+  await handler(sreq, stateRes)
+  const { items } = JSON.parse(await sp)
+  const key = items[0]?.key
+
+  const res = makeRes()
+  const pdf = Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(256, 65)])
+  const req = makeReq('POST', `/api/dsh-literature/import?key=${key}&filename=local.pdf`, '127.0.0.1', pdf)
+  const p = collect(res)
+  await handler(req, res)
+  const body = JSON.parse(await p)
+  check('import stores the uploaded PDF', body.item?.pdf?.source === 'local-import', body.item?.pdf)
+  check('import falls through to save (zotero down -> save_failed)', ['saved', 'save_failed'].includes(body.item?.state), body.item?.state)
+
+  // Non-PDF payload is rejected.
+  const res2 = makeRes()
+  const req2 = makeReq('POST', `/api/dsh-literature/import?key=${key}&filename=bad.pdf`, '127.0.0.1', Buffer.from('<!doctype html><title>Sign in</title>'))
+  const p2 = collect(res2)
+  await handler(req2, res2)
+  const body2 = JSON.parse(await p2)
+  check('non-PDF upload is rejected', res2.status === 500 && /PDF/.test(body2.error ?? ''), { status: res2.status, error: body2.error })
+}
+
+// 7. pdf route without a downloaded file → 404
 {
   const res = makeRes()
   const req = makeReq('GET', '/api/dsh-literature/pdf/nonexistent')
@@ -176,7 +204,7 @@ const handler = prefix.handler
   check('missing pdf is 404', res.status === 404, res.status)
 }
 
-// 7. unknown route
+// 8. unknown route
 {
   const res = makeRes()
   const req = makeReq('GET', '/api/dsh-literature/nope')
@@ -185,7 +213,7 @@ const handler = prefix.handler
   check('unknown route is 404', res.status === 404, res.status)
 }
 
-// 8. SSE
+// 9. SSE
 {
   const res = makeRes()
   const req = makeReq('GET', '/api/dsh-literature/events')

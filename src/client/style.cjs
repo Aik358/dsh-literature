@@ -37,6 +37,23 @@ const CSS = `
 
 .zt-panel[hidden] { display: none; }
 
+/* When embedded as a tab inside dsh-better-sidebar's right panel, the panel
+   stops being a floating window and fills its host container. */
+.zt-panel.zt-panel-embedded {
+  position: static;
+  inset: auto;
+  width: 100% !important;
+  min-width: 0;
+  max-width: none;
+  height: 100%;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  z-index: auto;
+}
+.zt-panel-embedded .zt-handle-l,
+.zt-panel-embedded .zt-handle-br { display: none; }
+
 .zt-header {
   display: flex;
   align-items: center;

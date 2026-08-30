@@ -97,15 +97,20 @@ export async function exportToDirectory(record, pdfBuffer) {
   const base = pdfFileName(record, config.naming)
   const stem = base.replace(/\.pdf$/i, '')
   const pdfPath = join(dir, base)
-  const jsonPath = join(dir, `${stem}.csl.json`)
-  const risPath = join(dir, `${stem}.ris`)
+  const formats = new Set(config.exportFormats?.length ? config.exportFormats : ['csl-json', 'ris'])
+  const wantCsl = formats.has('csl-json')
+  const wantRis = formats.has('ris')
+
+  const jsonPath = wantCsl ? join(dir, `${stem}.csl.json`) : null
+  const risPath = wantRis ? join(dir, `${stem}.ris`) : null
 
   // `stem` may contain separators from a badly authored template.
-  const safePaths = [pdfPath, jsonPath, risPath].map((p) => resolve(dir, p.replace(/^.*[\\/]/, '')))
+  const safePaths = [pdfPath, jsonPath, risPath].filter(Boolean).map((p) => resolve(dir, p.replace(/^.*[\\/]/, '')))
 
   if (pdfBuffer?.length) await writeFile(safePaths[0], pdfBuffer)
-  await writeFile(safePaths[1], JSON.stringify(cslJson(record), null, 2), 'utf8')
-  await writeFile(safePaths[2], ris(record), 'utf8')
+  let i = 1
+  if (wantCsl) await writeFile(safePaths[i++], JSON.stringify(cslJson(record), null, 2), 'utf8')
+  if (wantRis) await writeFile(safePaths[i++], ris(record), 'utf8')
 
-  return { dir, pdfPath: safePaths[0], jsonPath: safePaths[1], risPath: safePaths[2] }
+  return { dir, pdfPath: safePaths[0], jsonPath: jsonPath ? safePaths[wantCsl ? 1 : 0] : null, risPath: risPath ? safePaths[safePaths.length - 1] : null }
 }

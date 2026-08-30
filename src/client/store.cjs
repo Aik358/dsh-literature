@@ -111,8 +111,23 @@ async function refresh() {
 async function scanText(text) {
   if (!text?.trim()) return []
   const created = await api.scan(text)
+  // Auto-resolve when configured; progress arrives over SSE.
+  if (created?.length && state.config?.autoResolve !== false) {
+    await Promise.allSettled(created.map((c) => api.resolve(c.key)))
+  }
   await refresh()
   return created ?? []
+}
+
+async function importPdf(key, file, opts) {
+  setBusy(key, true)
+  try {
+    const { item } = await api.importPdf(key, file, opts)
+    await refresh()
+    return item
+  } finally {
+    setBusy(key, false)
+  }
 }
 
 async function resolveItem(key) {
@@ -242,6 +257,7 @@ const store = {
   saveItem,
   retryItem,
   discardItem,
+  importPdf,
   showDiff,
   openPanel,
   closePanel,

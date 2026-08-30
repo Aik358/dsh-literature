@@ -30,11 +30,12 @@ import { log, warn } from './log.js'
 const FAILURE_MESSAGES = {
   no_source: '没有找到开放获取的全文来源',
   paywalled: '该文献没有开放获取全文（可能是付费墙）',
+  needs_login: '该文献需要登录或机构权限：请先登录后在浏览器下载 PDF，再点「导入本地 PDF」',
   not_found: '标识符在元数据服务中查不到',
   timeout: '请求超时',
   network: '网络请求失败',
-  zotero_not_running: 'Zotero 未运行',
-  zotero_error: 'Zotero 返回错误',
+  zotero_not_running: '文献库未运行',
+  zotero_error: '文献库返回错误',
   no_dir: '未配置导出目录',
   no_metadata: '无法解析出元数据',
 }
@@ -44,7 +45,7 @@ function failure(code, message, extra = {}) {
     code,
     message: message || FAILURE_MESSAGES[code] || '操作失败',
     // Only transient conditions are worth a retry button.
-    retryable: !['paywalled', 'no_source', 'not_found', 'no_dir', 'no_metadata'].includes(code),
+    retryable: !['paywalled', 'needs_login', 'no_source', 'not_found', 'no_dir', 'no_metadata'].includes(code),
     ...extra,
   }
 }
@@ -344,6 +345,40 @@ export async function retryItem(key) {
   if (item.state === 'fetch_failed') return fetchItemPdf(key)
   if (item.state === 'save_failed') return saveItem(key)
   return item
+}
+
+/**
+ * Local import for paywalled/needs-login papers: the user signs in on the
+ * publisher's site in their own browser, downloads the PDF, then hands it to
+ * the panel. The host writes the bytes into the shadow store and, when asked,
+ * immediately runs the normal save pipeline (Zotero or directory).
+ */
+export async function importPdf(key, buffer, { filename = 'imported.pdf', autoSave = true } = {}) {
+  const item = await store.getItem(key)
+  if (!item) throw failure('not_found', '条目不存在')
+  if (!buffer || buffer.length < 8) throw failure('network', '文件内容为空或不是有效 PDF')
+
+  // %PDF magic check, same rule the downloader enforces.
+  const magic = buffer.subarray(0, 5)
+  if (!magic.equals(Buffer.from('%PDF-', 'latin1'))) {
+    throw failure('network', '所选文件不是有效的 PDF')
+  }
+
+  const path = pdfPathFor(key)
+  await mkdir(dirname(path), { recursive: true })
+  await writeFile(path, buffer)
+
+  const updated = await update(key, {
+    state: 'fetched',
+    pdf: { path, size: buffer.length, source: 'local-import', url: '', filename },
+    error: null,
+  })
+
+  let saved = updated
+  if (autoSave) {
+    saved = await saveItem(key)
+  }
+  return saved
 }
 
 export { normalizeDoi, arxivBase, log }

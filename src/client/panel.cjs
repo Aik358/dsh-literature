@@ -25,6 +25,7 @@ const STATE_TONE = {
   save_failed: 'error',
   fetch_failed: 'error',
   resolve_failed: 'error',
+  needs_login: 'warn',
   duplicate: 'warn',
 }
 
@@ -65,7 +66,15 @@ function ItemCard({ item }) {
     actions.push(h(Button, { key: 'fetch', variant: 'primary', onClick: () => store.fetchPdf(item.key), loading: busy }, t('action.download')))
   } else if (item.state === 'fetch_failed') {
     actions.push(h(Button, { key: 'fetch', variant: 'primary', onClick: () => store.retryItem(item.key), loading: busy }, t('action.retry')))
-    if (item.error?.code === 'paywalled') {
+    const code = item.error?.code
+    if (code === 'paywalled' || code === 'needs_login') {
+      // Graceful path for paywalled / login-gated papers: open the source page
+      // (where the user signs in) and let them hand the downloaded PDF back.
+      actions.push(
+        h(Button, { key: 'login', onClick: () => window.open(item.record?.url || `https://doi.org/${item.doi}`, '_blank') }, t('action.openLoginPage')),
+      )
+      actions.push(h(ImportPdfButton, { key: 'import', item }))
+    } else if (code === 'paywalled') {
       actions.push(
         h(Button, { key: 'open', onClick: () => window.open(item.record?.url || `https://doi.org/${item.doi}`, '_blank') }, t('action.openSource')),
       )
@@ -157,12 +166,12 @@ function SearchBar() {
   )
 }
 
-function PanelHeader({ onClose }) {
+function PanelHeader({ onClose, embedded = false }) {
   const state = useStore()
   const dragRef = useRef(null)
   const zoteroRunning = state.zotero?.running === true
 
-  const onDragStart = (e) => {
+  const onDragStart = embedded ? null : (e) => {
     if (e.target.closest('button')) return
     const startX = e.clientX
     const startY = e.clientY
@@ -256,7 +265,7 @@ function Reader({ item }) {
           pdfUrl,
           docId: item.key,
           annotations: ann.annotations ?? [],
-          mode: 'fit-width',
+          mode: store.getSnapshot().config?.readerFit ?? 'fit-width',
         })
         if (disposed) {
           ctrl.destroy()
@@ -366,6 +375,35 @@ function Reader({ item }) {
   )
 }
 
+function ImportPdfButton({ item }) {
+  const inputRef = useRef(null)
+  const [busy, setBusy] = useState(false)
+  return h(
+    'span',
+    null,
+    h('input', {
+      ref: inputRef,
+      type: 'file',
+      accept: 'application/pdf,.pdf',
+      style: { display: 'none' },
+      onChange: async (e) => {
+        const file = e.target.files?.[0]
+        e.target.value = ''
+        if (!file) return
+        setBusy(true)
+        try {
+          await store.importPdf(item.key, file)
+        } catch (err) {
+          console.warn('[dsh-literature] import failed', err)
+        } finally {
+          setBusy(false)
+        }
+      },
+    }),
+    h(Button, { onClick: () => inputRef.current?.click(), loading: busy, title: t('action.importPdfHint') }, t('action.importPdf')),
+  )
+}
+
 function PanelBody() {
   const state = useStore()
   if (state.view === 'settings') return h(SettingsPage, { key: 'settings' })
@@ -381,25 +419,37 @@ function PanelBody() {
   return h(ItemList, { key: 'list' })
 }
 
-function Panel({ onClose }) {
+function Panel({ onClose, embedded = false }) {
   const state = useStore()
-  if (!state.open) return null
+  if (!state.open && !embedded) return null
 
   const zoteroRunning = state.zotero?.running === true
 
   return h(
     'div',
-    { className: 'zt-panel', style: { width: state.geometry.width } },
-    h(PanelHeader, { onClose }),
+    {
+      className: embedded ? 'zt-panel zt-panel-embedded' : 'zt-panel',
+      style: embedded ? undefined : { width: state.geometry.width },
+    },
+    h(PanelHeader, { onClose, embedded }),
     !state.loaded && state.loadError ? h('div', { className: 'zt-banner' }, t('banner.offline')) : null,
     !zoteroRunning ? h('div', { className: 'zt-banner' }, t('banner.zoteroDown')) : null,
     h('div', { className: 'zt-body' },
       state.view === 'list' ? h(SearchBar, { key: 'search' }) : null,
       h(PanelBody, { key: 'body' }),
     ),
-    h(ResizeHandle, { edge: 'left' }),
-    h(ResizeHandle, { edge: 'br' }),
+    !embedded ? h(ResizeHandle, { edge: 'left' }) : null,
+    !embedded ? h(ResizeHandle, { edge: 'br' }) : null,
   )
+}
+
+/**
+ * Container rendered inside a `dsh-better-sidebar` tab. The host passes
+ * `visible` (active + panel open); we keep the component mounted so the PDF
+ * reader doesn't reload on every tab switch.
+ */
+function LibraryTab(props) {
+  return h(Panel, { embedded: true, onClose: () => {} })
 }
 
 function SidebarButton({ wide }) {
@@ -418,4 +468,4 @@ function SidebarButton({ wide }) {
   )
 }
 
-module.exports = { Panel, SidebarButton }
+module.exports = { Panel, SidebarButton, LibraryTab }

@@ -35,6 +35,23 @@ const api = {
   retry: (key) => request('/retry', { method: 'POST', body: { key } }),
   diff: (key) => request('/diff', { method: 'POST', body: { key } }),
   discard: (key) => request('/discard', { method: 'POST', body: { key } }),
+  /** Uploads a locally-downloaded PDF for a paywalled / needs-login entry. */
+  importPdf: async (key, file, { autoSave = true } = {}) => {
+    const res = await fetch(`${BASE}/import?key=${encodeURIComponent(key)}&filename=${encodeURIComponent(file.name)}&autoSave=${autoSave ? 1 : 0}`, {
+      method: 'POST',
+      headers: { 'content-type': file.type || 'application/pdf' },
+      body: file,
+    })
+    const text = await res.text()
+    let parsed = {}
+    try {
+      parsed = text ? JSON.parse(text) : {}
+    } catch {
+      parsed = {}
+    }
+    if (!res.ok) throw new Error(parsed.error || `import -> HTTP ${res.status}`)
+    return parsed
+  },
   zoteroCollections: () => request('/zotero/collections?selected=1'),
   zoteroItems: (q) => request(`/zotero/items?q=${encodeURIComponent(q || '')}&limit=25`),
   annotations: (key) => request(`/annotations/${encodeURIComponent(key)}`),

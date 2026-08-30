@@ -29,8 +29,16 @@ const DEFAULTS = {
   preferredTags: [],
   /** Filename template for the 'dir' channel. */
   naming: '{author}_{year}_{title}',
+  /** Sidecar formats written by the 'dir' channel. */
+  exportFormats: ['csl-json', 'ris'],
   /** Fallback: regex-scan model replies for identifiers. Off by default. */
   autoScanSession: false,
+  /** Resolve metadata automatically right after an identifier is scanned. */
+  autoResolve: true,
+  /** Include quoted-title detection when scanning text. */
+  includeTitles: true,
+  /** Default behaviour when the library already holds a look-alike entry. */
+  conflictStrategy: 'ask',
   /** Unpaywall requires a contact email in the query string. */
   unpaywallEmail: '',
   retry: { maxAttempts: 3, baseDelayMs: 800, maxDelayMs: 8000 },
@@ -38,6 +46,9 @@ const DEFAULTS = {
   zoteroPort: 23119,
   /** Overrides automatic data-dir detection from the Zotero profile prefs. */
   dataDirOverride: '',
+  /** Panel geometry defaults (the client keeps live geometry in localStorage). */
+  panelWidth: 380,
+  readerFit: 'fit-width',
 }
 
 function merge(base, patch) {
