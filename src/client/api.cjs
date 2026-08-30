@@ -38,6 +38,22 @@ const api = {
   cite: (key, opts = {}) => request('/cite', { method: 'POST', body: { key, ...opts } }),
   scanDir: (dir) => request('/scan-dir', { method: 'POST', body: { dir } }),
   importZotero: (limit = 50) => request('/import-zotero', { method: 'POST', body: { limit } }),
+  dropPdf: async (file) => {
+    const res = await fetch(`${BASE}/drop?filename=${encodeURIComponent(file.name)}`, {
+      method: 'POST',
+      headers: { 'content-type': file.type || 'application/pdf' },
+      body: file,
+    })
+    const text = await res.text()
+    let parsed = {}
+    try {
+      parsed = text ? JSON.parse(text) : {}
+    } catch {
+      parsed = {}
+    }
+    if (!res.ok) throw new Error(parsed.error || `drop -> HTTP ${res.status}`)
+    return parsed
+  },
   /** Uploads a locally-downloaded PDF for a paywalled / needs-login entry. */
   importPdf: async (key, file, { autoSave = true } = {}) => {
     const res = await fetch(`${BASE}/import?key=${encodeURIComponent(key)}&filename=${encodeURIComponent(file.name)}&autoSave=${autoSave ? 1 : 0}`, {

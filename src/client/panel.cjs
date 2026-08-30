@@ -201,17 +201,48 @@ function ItemCard({ item }) {
 
 function ItemList() {
   const state = useStore()
+  const [dragging, setDragging] = useState(false)
+  const dragCounter = useRef(0)
+
+  const onDragOver = (e) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+  }
+  const onDragEnter = () => {
+    dragCounter.current += 1
+    setDragging(true)
+  }
+  const onDragLeave = () => {
+    dragCounter.current = Math.max(0, dragCounter.current - 1)
+    if (!dragCounter.current) setDragging(false)
+  }
+  const onDrop = (e) => {
+    e.preventDefault()
+    dragCounter.current = 0
+    setDragging(false)
+    const files = [...(e.dataTransfer?.files ?? [])].filter((f) => /\.pdf$/i.test(f.name))
+    if (!files.length) {
+      store.flash(t('dropNoPdf'))
+      return
+    }
+    for (const f of files) {
+      store
+        .dropPdf(f)
+        .then(() => store.flash(`${t('dropOk')} ${f.name}`))
+        .catch((err) => store.flash(err.message))
+    }
+  }
+
+  const listProps = { className: 'zt-list', onDragOver, onDragEnter, onDragLeave, onDrop }
+  if (dragging) listProps['data-dragging'] = '1'
+
   if (!state.loaded) {
-    return h('div', { className: 'zt-list' }, h('div', { className: 'zt-skeleton' }), h('div', { className: 'zt-skeleton' }), h('div', { className: 'zt-skeleton' }))
+    return h('div', listProps, h('div', { className: 'zt-skeleton' }), h('div', { className: 'zt-skeleton' }), h('div', { className: 'zt-skeleton' }))
   }
   if (state.items.length === 0) {
-    return h(
-      'div',
-      { className: 'zt-list' },
-      h(EmptyState, { key: 'empty' }),
-    )
+    return h('div', listProps, h(EmptyState, { key: 'empty' }))
   }
-  return h('div', { className: 'zt-list' }, ...state.items.map((item) => h(ItemCard, { key: item.key, item })))
+  return h('div', listProps, ...state.items.map((item) => h(ItemCard, { key: item.key, item })))
 }
 
 function SearchBar() {

@@ -260,6 +260,16 @@ export async function handler(req, res) {
       return
     }
 
+    if (head === 'drop' && methodOk(req, 'POST')) {
+      // Drag-and-drop import: raw PDF bytes in the body, filename in the query.
+      const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+      const filename = url.searchParams.get('filename') || 'dropped.pdf'
+      const buffer = await readRawBody(req, 128 * 1024 * 1024)
+      const item = await pipeline.importDroppedPdf(buffer, { filename })
+      writeJson(res, 200, { item })
+      return
+    }
+
     if (head === 'import-zotero' && methodOk(req, 'POST')) {
       const body = await readJsonBody(req)
       const { importFromZotero } = await import('./importer.js')

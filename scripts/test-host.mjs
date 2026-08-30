@@ -195,6 +195,24 @@ const handler = prefix.handler
   check('non-PDF upload is rejected', res2.status === 500 && /PDF/.test(body2.error ?? ''), { status: res2.status, error: body2.error })
 }
 
+// 6b. drop: drag-and-drop PDF import (DOI filename -> saved builtin)
+{
+  const res = makeRes()
+  const pdf = Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(128, 70)])
+  const req = makeReq('POST', '/api/dsh-literature/drop?filename=10.1234_test.pdf', '127.0.0.1', pdf)
+  const p = collect(res)
+  await handler(req, res)
+  const body = JSON.parse(await p)
+  check('drop imports into the built-in library', body.item?.state === 'saved' && body.item?.saveMode === 'builtin', body.item?.state)
+
+  const resBad = makeRes()
+  const reqBad = makeReq('POST', '/api/dsh-literature/drop?filename=bad.txt', '127.0.0.1', Buffer.from('not a pdf'))
+  const pBad = collect(resBad)
+  await handler(reqBad, resBad)
+  const bodyBad = JSON.parse(await pBad)
+  check('drop rejects non-PDF payloads', resBad.status === 500 && /PDF/.test(bodyBad.error ?? ''), bodyBad.error)
+}
+
 // 7. pdf route without a downloaded file → 404
 {
   const res = makeRes()

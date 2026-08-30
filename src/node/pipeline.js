@@ -366,8 +366,9 @@ export async function retryItem(key) {
 /**
  * Local import for paywalled/needs-login papers: the user signs in on the
  * publisher's site in their own browser, downloads the PDF, then hands it to
- * the panel. The host writes the bytes into the shadow store and, when asked,
- * immediately runs the normal save pipeline (Zotero or directory).
+ * the panel. The host writes the bytes into the shadow store and immediately
+ * confirms the item into the BUILT-IN library — importing a local file is a
+ * local action and must never depend on an external app being up.
  */
 export async function importPdf(key, buffer, { filename = 'imported.pdf', autoSave = true } = {}) {
   const item = await store.getItem(key)
@@ -392,8 +393,83 @@ export async function importPdf(key, buffer, { filename = 'imported.pdf', autoSa
 
   let saved = updated
   if (autoSave) {
-    saved = await saveItem(key)
+    // Force the built-in library regardless of the configured save mode.
+    saved = await saveItem(key, { mode: 'builtin' })
   }
+  return saved
+}
+
+/**
+ * Drag-and-drop import: a PDF dropped onto the panel is added to the library,
+ * its identity inferred from the file name, metadata resolved, and the item
+ * confirmed into the built-in library — all in one action.
+ */
+export async function importDroppedPdf(buffer, { filename = 'dropped.pdf' } = {}) {
+  if (!buffer || buffer.length < 8 || !buffer.subarray(0, 5).equals(Buffer.from('%PDF-', 'latin1'))) {
+    throw failure('network', '拖入的文件不是有效的 PDF')
+  }
+
+  const { titleFromFilename } = await import('./importer.js')
+  const hit = titleFromFilename(filename)
+  const provisional = buildItem(
+    hit
+      ? {
+          doi: hit.kind === 'doi' ? hit.value : '',
+          arxiv: hit.kind === 'arxiv' ? hit.value : '',
+          title: hit.kind === 'title' ? hit.value : '',
+        }
+      : { title: String(filename).replace(/\.pdf$/i, '') },
+  )
+  if (!provisional.key) throw failure('network', '无法从文件名识别该文献')
+
+  // Already in the library? Update the stored PDF and return as-is.
+  const clash = await store.getItem(provisional.key)
+  if (clash) {
+    const path = pdfPathFor(provisional.key)
+    await mkdir(dirname(path), { recursive: true })
+    await writeFile(path, buffer)
+    const updated = await store.patchItem(provisional.key, {
+      state: 'fetched',
+      pdf: { path, size: buffer.length, source: 'local-import', url: '', filename },
+      error: null,
+      updatedAt: Date.now(),
+    })
+    sse.emitItem(updated)
+    return updated
+  }
+
+  const path = pdfPathFor(provisional.key)
+  await mkdir(dirname(path), { recursive: true })
+  await writeFile(path, buffer)
+
+  let item = await store.putItem({
+    ...provisional,
+    kind: hit?.kind ?? 'title',
+    rawValue: hit?.value ?? '',
+    display: hit?.value ?? provisional.title,
+    sourceFile: filename,
+    state: 'fetched',
+    pdf: { path, size: buffer.length, source: 'drop-import', url: '', filename },
+    createdAt: Date.now(),
+  })
+  sse.emitItem(item)
+
+  // Resolve metadata; a miss leaves the file-name title as the record so the
+  // built-in save below still succeeds.
+  try {
+    item = await resolveItem(item.key)
+  } catch {
+    /* keep as-is */
+  }
+  if (!item.record) {
+    item = await store.patchItem(item.key, {
+      record: { itemType: 'journalArticle', title: item.title || provisional.title, authors: [], year: null },
+      state: 'resolved',
+    })
+  }
+
+  const saved = await saveItem(item.key, { mode: 'builtin' })
+  sse.emitItem(saved)
   return saved
 }
 

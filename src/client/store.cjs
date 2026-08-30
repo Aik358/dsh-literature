@@ -143,6 +143,12 @@ async function citeItem(key, opts) {
   return api.cite(key, opts)
 }
 
+async function dropPdf(file) {
+  const { item } = await api.dropPdf(file)
+  await refresh()
+  return item
+}
+
 async function importPdf(key, file, opts) {
   setBusy(key, true)
   try {
@@ -285,6 +291,7 @@ const store = {
   scanDir,
   importZotero,
   citeItem,
+  dropPdf,
   flash,
   showDiff,
   openPanel,

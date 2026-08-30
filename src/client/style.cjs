@@ -99,6 +99,11 @@ const CSS = `
 .zt-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 
 .zt-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+.zt-list[data-dragging='1'] {
+  outline: 2px dashed var(--dsw-alias-brand-primary, #4d6bfe);
+  outline-offset: -2px;
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary, #4d6bfe) 6%, transparent);
+}
 
 .zt-card {
   padding: 12px;
