@@ -77,6 +77,15 @@ function apply(ctx) {
 
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-literature: dictionaries')
 
+  // Resolve the slots service FIRST — every registration below reads it, and
+  // an effect body runs immediately, so referencing `slots` before its `const`
+  // initializes would throw a TDZ ReferenceError at load time.
+  const slots = ctx.slots
+  if (!slots) {
+    console.warn('[dsh-literature] slots service unavailable — side panel disabled')
+    return
+  }
+
   const syncLocale = () => setLocale(detectLocale(ctx) || 'zh')
   syncLocale()
   ctx.on('locale/change', syncLocale)
@@ -100,12 +109,6 @@ function apply(ctx) {
       ),
     'dsh-literature: settings page',
   )
-
-  const slots = ctx.slots
-  if (!slots) {
-    console.warn('[dsh-literature] slots service unavailable — side panel disabled')
-    return
-  }
 
   const bsbNow = hasBetterSidebar(ctx)
   if (bsbNow) {
