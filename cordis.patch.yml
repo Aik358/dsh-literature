@@ -1,0 +1,12 @@
+# dsh-literature bundle patch: inserts the plugin row into the web profile roster.
+# Applied as a profile bundle layer (the `dsh.bundle.patch` manifest field).
+#
+# The node half (exports ".") runs in the host process:
+#   - /api/dsh-literature/* loopback-only routes (state, scan, resolve, fetch, save, events)
+#   - zotero_lookup / zotero_save agent tools
+#   - session/event fallback scanning (off by default)
+# The `dsh.client` declaration in package.json makes the browser half
+# (exports "./client", served at /plugins/<id>/client.js) load in the web GUI.
+- insert:
+    - id: dsh-literature-pre
+      name: '@a9i5k4/dsh-literature'
