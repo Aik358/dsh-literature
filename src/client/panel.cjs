@@ -66,17 +66,16 @@ function ItemCard({ item }) {
     actions.push(h(Button, { key: 'fetch', variant: 'primary', onClick: () => store.fetchPdf(item.key), loading: busy }, t('action.download')))
   } else if (item.state === 'fetch_failed') {
     actions.push(h(Button, { key: 'fetch', variant: 'primary', onClick: () => store.retryItem(item.key), loading: busy }, t('action.retry')))
+    // Whatever the failure code, if the item has a resolvable source page we
+    // always surface the sign-in / manual-download path — paywalls, 403s and
+    // institutional-only books all end up here and all need the same rescue.
     const code = item.error?.code
-    if (code === 'paywalled' || code === 'needs_login') {
-      // Graceful path for paywalled / login-gated papers: open the source page
-      // (where the user signs in) and let them hand the downloaded PDF back.
+    const sourceUrl = item.record?.url || (item.doi ? `https://doi.org/${item.doi}` : '')
+    if (sourceUrl) {
+      const loginish = code === 'paywalled' || code === 'needs_login'
       actions.push(
-        h(Button, { key: 'login', onClick: () => window.open(item.record?.url || `https://doi.org/${item.doi}`, '_blank') }, t('action.openLoginPage')),
-      )
-      actions.push(h(ImportPdfButton, { key: 'import', item }))
-    } else if (code === 'paywalled') {
-      actions.push(
-        h(Button, { key: 'open', onClick: () => window.open(item.record?.url || `https://doi.org/${item.doi}`, '_blank') }, t('action.openSource')),
+        h(Button, { key: 'login', onClick: () => window.open(sourceUrl, '_blank') }, loginish ? t('action.openLoginPage') : t('action.openSource')),
+        h(ImportPdfButton, { key: 'import', item }),
       )
     }
   } else if (item.state === 'fetched') {

@@ -127,7 +127,14 @@ const LOGIN_HINT =
 export async function fetchPdf(record, { timeoutMs = 30000, unpaywallEmail = '' } = {}) {
   const list = await candidates(record, { unpaywallEmail })
   if (!list.length) {
-    throw new PdfFailure('没有可用的全文来源', 'no_source', { retryable: false })
+    // Books, chapters, reports and theses rarely have OA full text; frame the
+    // failure as a login/institutional request rather than a generic no-source.
+    const bookLike = ['book', 'bookSection', 'report', 'thesis'].includes(record.itemType)
+    throw new PdfFailure(
+      bookLike ? '该出版物通常不提供开放获取全文，请通过机构账号或图书馆获取' : '没有可用的全文来源',
+      bookLike ? 'needs_login' : 'no_source',
+      { retryable: false },
+    )
   }
 
   const failures = []
@@ -166,6 +173,12 @@ export async function fetchPdf(record, { timeoutMs = 30000, unpaywallEmail = '' 
     } catch (e) {
       if (e instanceof FetchFailure && e.code === 'not_found') {
         failures.push({ url: cand.url, source: cand.source, reason: '404' })
+        continue
+      }
+      if (e instanceof FetchFailure && e.code === 'forbidden') {
+        // 401/403 on the actual PDF host usually means a login / institutional
+        // wall or bot protection — surface it as a sign-in request.
+        failures.push({ url: cand.url, source: cand.source, reason: 'HTTP 403 (可能需要登录或机构访问)', needsLogin: true })
         continue
       }
       failures.push({ url: cand.url, source: cand.source, reason: e.message })
