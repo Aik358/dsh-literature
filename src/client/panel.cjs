@@ -199,6 +199,44 @@ function ItemCard({ item }) {
   )
 }
 
+/** Loose-search results the user can pick from (Scribbr Autocite style). */
+function CandidateList() {
+  const state = useStore()
+  const q = state.searchQuery ?? ''
+  const open = (url) => window.open(url, '_blank')
+  const ext = [
+    { label: t('search.scholar'), onClick: () => open(`https://scholar.google.com/scholar?q=${encodeURIComponent(q)}`) },
+    { label: t('search.baidu'), onClick: () => open(`https://xueshu.baidu.com/s?wd=${encodeURIComponent(q)}`) },
+    { label: t('search.cnki'), onClick: () => open(`https://search.cnki.com.cn/Search/Result?content=${encodeURIComponent(q)}`) },
+  ]
+  return h(
+    'div',
+    { className: 'zt-candidates' },
+    h('div', { className: 'zt-row', style: { justifyContent: 'space-between', marginBottom: 4 } },
+      h('span', { style: { fontSize: 12, fontWeight: 500, color: 'var(--dsw-alias-label-secondary, #666)' } },
+        `${t('searchCandidates.title')}「${q}」`,
+      ),
+      h(Button, { variant: 'ghost', onClick: () => store.closeSearch() }, t('action.discard')),
+    ),
+    state.searchResults.map((c, i) =>
+      h('div', { key: i, className: 'zt-cand' },
+        h('div', { style: { minWidth: 0 } },
+          h('div', { className: 'zt-cand-title' }, c.title),
+          h('div', { className: 'zt-card-meta' }, [(c.authors ?? []).map((a) => a.lastName).join(', '), c.year, c.container].filter(Boolean).join(' · ')),
+        ),
+        h(Button, { variant: 'primary', onClick: () => store.addCandidate(c) }, t('searchCandidates.add')),
+      ),
+    ),
+    state.searchResults.length === 0
+      ? h('div', { className: 'zt-hint', style: { padding: '4px 2px' } }, t('searchCandidates.empty'))
+      : null,
+    h('div', { className: 'zt-row', style: { gap: 6, marginTop: 6 } },
+      h('span', { className: 'zt-hint', style: { marginRight: 4 } }, t('searchCandidates.external')),
+      ...ext.map((it, i) => h(Button, { key: i, onClick: it.onClick }, it.label)),
+    ),
+  )
+}
+
 function ItemList() {
   const state = useStore()
   const [dragging, setDragging] = useState(false)
@@ -250,10 +288,16 @@ function SearchBar() {
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const submit = async () => {
-    if (!text.trim()) return
+    const q = text.trim()
+    if (!q) return
     setBusy(true)
     try {
-      await store.scanText(text)
+      const created = await store.scanText(q)
+      // No strict identifier matched (title / pasted text / unknown input):
+      // fall back to the Scribbr-style loose search with candidates.
+      if (!created?.length) {
+        await store.searchCandidates(q)
+      }
       setText('')
     } finally {
       setBusy(false)
@@ -561,7 +605,10 @@ function PanelBody() {
   if (state.view === 'reader') {
     const item = state.items.find((i) => i.key === state.selectedKey)
     if (item) return h(Reader, { key: item.key, item })
-    return h(ItemList, { key: 'list' })
+    return h('div', { key: 'listwrap', style: { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 } },
+    state.searchResults?.length ? h(CandidateList, { key: 'candidates' }) : null,
+    h(ItemList, { key: 'list' }),
+  )
   }
   return h(ItemList, { key: 'list' })
 }

@@ -39,6 +39,7 @@ const DOI_LABEL = new RegExp(`\\bDOI\\s*[:：]\\s*(10\\.\\d{4,9}\\/${DOI_TAIL})`
 
 const ARXIV_NEW = /\barXiv\s*[:. ]?\s*(\d{4}\.\d{4,5})(v\d+)?\b/gi
 const ARXIV_OLD = /\barXiv\s*[:. ]?\s*([a-z][a-z-]*(?:\.[A-Z]{2})?\/\d{7})(v\d+)?\b/gi
+const URL_RE = /\bhttps?:\/\/[^\s<>"']+/gi
 const ARXIV_URL = /arxiv\.org\/(?:abs|pdf)\/([^\s"'?#>]+?)(?:\.pdf)?(?=[\s"'?#>()]|$)/gi
 
 const PMID = /\bPMID\s*[:：]?\s*(\d{1,8})\b/gi
@@ -154,6 +155,12 @@ export function extractIdentifiers(text, options = {}) {
     ISBN.lastIndex = 0
     while ((m = ISBN.exec(source)) !== null) {
       push(out, seen, { kind: 'isbn', value: m[1].replace(/[-\s]/g, ''), display: m[1], index: offset + m.index, confidence: 0.85 + confidenceBonus })
+    }    // Generic URLs: any http(s) link that is not already a DOI/arXiv resolver.
+    URL_RE.lastIndex = 0
+    while ((m = URL_RE.exec(source)) !== null) {
+      const raw = trimRight(m[0])
+      if (/doi\.org|arxiv\.org|dx\.doi/i.test(raw)) continue
+      push(out, seen, { kind: 'url', value: raw, display: raw, index: offset + m.index, confidence: 0.9 + confidenceBonus })
     }
   }
 

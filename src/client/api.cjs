@@ -38,6 +38,8 @@ const api = {
   cite: (key, opts = {}) => request('/cite', { method: 'POST', body: { key, ...opts } }),
   scanDir: (dir) => request('/scan-dir', { method: 'POST', body: { dir } }),
   importZotero: (limit = 50) => request('/import-zotero', { method: 'POST', body: { limit } }),
+  searchCandidates: (q, rows = 8) => request('/search', { method: 'POST', body: { q, rows } }),
+  addCandidate: (candidate) => request('/add-candidate', { method: 'POST', body: { candidate } }),
   dropPdf: async (file) => {
     const res = await fetch(`${BASE}/drop?filename=${encodeURIComponent(file.name)}`, {
       method: 'POST',

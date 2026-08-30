@@ -213,6 +213,23 @@ const handler = prefix.handler
   check('drop rejects non-PDF payloads', resBad.status === 500 && /PDF/.test(bodyBad.error ?? ''), bodyBad.error)
 }
 
+// 6c. search + add-candidate routes
+{
+  const res = makeRes()
+  const req = makeReq('POST', '/api/dsh-literature/search', '127.0.0.1', Buffer.from(JSON.stringify({ q: 'attention is all you need', rows: 3 })))
+  const p = collect(res)
+  await handler(req, res)
+  const body = JSON.parse(await p)
+  check('search returns candidates', Array.isArray(body.candidates) && body.candidates.length > 0, body.candidates?.length)
+
+  const res2 = makeRes()
+  const req2 = makeReq('POST', '/api/dsh-literature/add-candidate', '127.0.0.1', Buffer.from(JSON.stringify({ candidate: body.candidates[0] })))
+  const p2 = collect(res2)
+  await handler(req2, res2)
+  const body2 = JSON.parse(await p2)
+  check('add-candidate creates a resolved item', body2.item?.state === 'resolved' && !!body2.item?.record, body2.item?.state)
+}
+
 // 7. pdf route without a downloaded file → 404
 {
   const res = makeRes()

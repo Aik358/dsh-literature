@@ -296,6 +296,28 @@ const CSS = `
 }
 .zt-advanced[open] > summary { margin-bottom: 8px; color: var(--dsw-alias-label-primary, #1f1f1f); }
 
+/* ---- candidate results (loose search) ---- */
+.zt-candidates {
+  flex: 0 0 auto;
+  max-height: 40%;
+  overflow-y: auto;
+  padding: 8px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.18));
+  background: var(--dsw-alias-bg-layer-1, #fafafa);
+}
+.zt-cand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  margin-bottom: 4px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.18));
+  background: var(--dsw-alias-bg-layer-2, #fff);
+}
+.zt-cand:hover { border-color: var(--dsw-alias-border-l2, rgba(128,128,128,.28)); }
+.zt-cand-title { font-size: 13px; font-weight: 500; line-height: 1.35; }
+
 /* ---- dropdown menu ---- */
 .zt-menu {
   position: absolute;

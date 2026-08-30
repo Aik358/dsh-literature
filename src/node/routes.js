@@ -260,6 +260,20 @@ export async function handler(req, res) {
       return
     }
 
+    if (head === 'search' && methodOk(req, 'POST')) {
+      const body = await readJsonBody(req)
+      const candidates = await pipeline.searchCandidates(String(body?.q ?? ''), Number(body?.rows ?? 8))
+      writeJson(res, 200, { candidates })
+      return
+    }
+
+    if (head === 'add-candidate' && methodOk(req, 'POST')) {
+      const body = await readJsonBody(req)
+      const item = await pipeline.addCandidate(body?.candidate ?? {})
+      writeJson(res, 200, { item })
+      return
+    }
+
     if (head === 'drop' && methodOk(req, 'POST')) {
       // Drag-and-drop import: raw PDF bytes in the body, filename in the query.
       const url = new URL(req.url ?? '/', 'http://127.0.0.1')

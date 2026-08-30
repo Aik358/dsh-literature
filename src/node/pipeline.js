@@ -88,14 +88,23 @@ export async function scanText(text) {
   const created = []
 
   for (const hit of found) {
-    const provisional = buildItem({
-      doi: hit.kind === 'doi' ? hit.value : '',
-      arxiv: hit.kind === 'arxiv' ? hit.value : '',
-      isbn: hit.kind === 'isbn' ? hit.value : '',
-      pmid: hit.kind === 'pmid' ? hit.value : '',
-      title: hit.kind === 'title' ? hit.value : '',
-    })
-    if (!provisional.key) continue
+    let provisional
+    if (hit.kind === 'url') {
+      // A bare URL: keep the URL itself as the entry identity until the page
+      // resolves into a real record.
+      provisional = buildItem({ title: hit.value })
+      if (!provisional.key) continue
+      provisional = { ...provisional, title: hit.value }
+    } else {
+      provisional = buildItem({
+        doi: hit.kind === 'doi' ? hit.value : '',
+        arxiv: hit.kind === 'arxiv' ? hit.value : '',
+        isbn: hit.kind === 'isbn' ? hit.value : '',
+        pmid: hit.kind === 'pmid' ? hit.value : '',
+        title: hit.kind === 'title' ? hit.value : '',
+      })
+      if (!provisional.key) continue
+    }
 
     const clash = existing.find((e) => sameWork(e, provisional)) ?? (await store.getItem(provisional.key))
     if (clash) continue
@@ -117,6 +126,48 @@ export async function scanText(text) {
   return created
 }
 
+/**
+ * Loose search: returns candidate records for ambiguous / title-only input,
+ * letting the user pick instead of failing (Scribbr Autocite behaviour).
+ */
+export async function searchCandidates(query, rows) {
+  const { searchCandidates: search } = await import('./metadata/search.js')
+  return search(query, { rows })
+}
+
+/** Adds a picked candidate straight to the library with its metadata. */
+export async function addCandidate(candidate) {
+  const rec = {
+    itemType: candidate.itemType ?? 'journalArticle',
+    title: candidate.title ?? '',
+    authors: candidate.authors ?? [],
+    year: candidate.year ?? null,
+    container: candidate.container ?? '',
+    volume: candidate.volume ?? '',
+    issue: candidate.issue ?? '',
+    pages: candidate.pages ?? '',
+    doi: candidate.doi ?? '',
+  }
+  const provisional = buildItem(rec)
+  if (!provisional.key) throw failure('no_metadata', '候选缺少可识别信息')
+  const clash = await store.getItem(provisional.key)
+  if (clash) {
+    sse.emitItem(clash)
+    return clash
+  }
+  const item = await store.putItem({
+    ...provisional,
+    kind: candidate.doi ? 'doi' : 'title',
+    rawValue: candidate.doi || rec.title,
+    display: rec.title,
+    record: rec,
+    state: 'resolved',
+    createdAt: Date.now(),
+  })
+  sse.emitItem(item)
+  return item
+}
+
 export async function resolveItem(key) {
   const item = await store.getItem(key)
   if (!item) throw failure('not_found', '条目不存在')
@@ -127,6 +178,56 @@ export async function resolveItem(key) {
 
   const config = await loadConfig()
   try {
+    // URL entries resolve by fetching the page and reading its metadata.
+    if (item.kind === 'url') {
+      const { resolveUrlPage } = await import('./metadata/url.js')
+      const page = await resolveUrlPage(item.rawValue || item.title, { timeoutMs: 20000 })
+      if (page.doi) {
+        // A DOI surfaced by the page is a stronger identity — resolve through
+        // the normal chain for full metadata.
+        const record = await resolveIdentifier({ kind: 'doi', value: page.doi }, { timeoutMs: 20000, unpaywallEmail: config.unpaywallEmail })
+        if (record) {
+          const merged = buildItem({ ...item, ...record })
+          const updated = await store.patchItem(key, {
+            ...merged,
+            key,
+            state: 'resolved',
+            record,
+            url: item.rawValue || page.url,
+            error: null,
+            updatedAt: Date.now(),
+          })
+          sse.emitItem(updated)
+          await finishTask(task, 'done', '元数据解析完成')
+          return updated
+        }
+      }
+      if (page.title) {
+        const record = {
+          itemType: 'webpage',
+          title: page.title,
+          authors: page.authors ?? [],
+          year: page.year ?? null,
+          url: item.rawValue || page.url,
+          doi: page.doi,
+        }
+        const updated = await store.patchItem(key, {
+          key,
+          state: 'resolved',
+          record,
+          title: page.title,
+          error: null,
+          updatedAt: Date.now(),
+        })
+        sse.emitItem(updated)
+        await finishTask(task, 'done', '已从页面解析元数据')
+        return updated
+      }
+      await update(key, { state: 'resolve_failed', error: failure('no_metadata', page.error ? `无法访问页面：${page.error}` : undefined) })
+      await finishTask(task, 'failed', '无法从页面解析元数据')
+      return store.getItem(key)
+    }
+
     const record = await withRetry(
       () =>
         resolveIdentifier(

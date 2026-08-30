@@ -31,6 +31,9 @@ let state = {
   loaded: false,
   loadError: '',
   flash: '',
+  searchResults: [],
+  searchQuery: '',
+  searchLoading: false,
   // panel geometry, restored from localStorage
   geometry: {
     x: persisted.x ?? null,
@@ -141,6 +144,23 @@ async function importZotero(limit = 50) {
 
 async function citeItem(key, opts) {
   return api.cite(key, opts)
+}
+
+async function searchCandidates(q) {
+  const { candidates } = await api.searchCandidates(q, 8)
+  set({ searchResults: candidates ?? [], searchQuery: q, searchLoading: false })
+  return candidates ?? []
+}
+
+async function addCandidate(candidate) {
+  const { item } = await api.addCandidate(candidate)
+  set({ searchResults: [], searchQuery: '' })
+  await refresh()
+  return item
+}
+
+function closeSearch() {
+  set({ searchResults: [], searchQuery: '', searchLoading: false })
 }
 
 async function dropPdf(file) {
@@ -292,6 +312,9 @@ const store = {
   importZotero,
   citeItem,
   dropPdf,
+  searchCandidates,
+  addCandidate,
+  closeSearch,
   flash,
   showDiff,
   openPanel,
