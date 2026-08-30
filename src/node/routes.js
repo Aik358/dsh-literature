@@ -62,7 +62,15 @@ async function handleEvents(req, res) {
 }
 
 async function servePdf(req, res, key) {
-  const path = safePdfPath(key)
+  // The key travels URL-encoded (spaces -> %20 etc.); titles with spaces and
+  // punctuation must be decoded before it can be mapped to the stored file.
+  let decoded = key
+  try {
+    decoded = decodeURIComponent(key)
+  } catch {
+    /* keep as-is */
+  }
+  const path = safePdfPath(decoded)
   if (!path) {
     writeJson(res, 400, { error: 'invalid key' })
     return

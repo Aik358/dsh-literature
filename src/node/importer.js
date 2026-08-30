@@ -101,13 +101,26 @@ export async function importDir(dir, { autoResolve = true } = {}) {
         continue
       }
 
+      // Copy the PDF into the shadow store so the entry is self-contained
+      // (the source folder may be cleaned up later).
+      let pdf = null
+      try {
+        const content = await readFile(abs)
+        if (content.subarray(0, 5).equals(PDF_MAGIC)) {
+          pdf = await savePdfBuffer(provisional.key, content)
+        }
+      } catch (e) {
+        warn(`copy pdf failed for ${name}:`, e.message)
+      }
+
       item = await store.putItem({
         ...provisional,
         kind: hit.kind,
         rawValue: hit.value,
         display: hit.value,
         title: provisional.title || hit.value,
-        state: 'discovered',
+        state: pdf ? 'fetched' : 'discovered',
+        pdf,
         sourceFile: abs,
         createdAt: Date.now(),
       })
