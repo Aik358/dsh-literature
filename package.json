@@ -1,6 +1,6 @@
 {
   "name": "@a9i5k4/dsh-literature",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "description": "DSH Literature 文献侧窗：在 DeepSeek Harness 侧边栏识别 DOI/arXiv/标题、抓取元数据与全文、写入本地文献库或导出目录，并提供内置 PDF 阅读器（缩放/翻页/目录/搜索/高亮/笔记）。",
   "type": "module",
   "main": "lib/index.js",

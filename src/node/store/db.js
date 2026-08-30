@@ -9,7 +9,7 @@ import { log, warn } from '../log.js'
  * download tasks, highlights, notes — lives here instead.
  */
 
-const EMPTY = { version: 1, items: {}, tasks: {}, annotations: {} }
+const EMPTY = { version: 1, items: {}, tasks: {}, annotations: {}, importedFiles: {} }
 
 let state = null
 let flushTimer = null
@@ -136,6 +136,29 @@ export async function patchAnnotation(key, id, patch) {
 export async function removeAnnotation(key, id) {
   const s = await load()
   s.annotations[key] = (s.annotations[key] ?? []).filter((a) => a.id !== id)
+  scheduleFlush()
+}
+
+/** Tracks watched-folder files so a re-scan only picks up new ones. */
+export async function getImportedFile(absPath) {
+  return (await load()).importedFiles[absPath] ?? null
+}
+
+export async function addImportedFile(absPath, mtimeMs) {
+  const s = await load()
+  s.importedFiles[absPath] = { mtimeMs: Number(mtimeMs), importedAt: Date.now() }
+  // Keep the tracking map bounded (LRU-ish: drop oldest entries beyond 500).
+  const keys = Object.keys(s.importedFiles)
+  if (keys.length > 500) {
+    const drop = keys.slice(0, keys.length - 500)
+    for (const k of drop) delete s.importedFiles[k]
+  }
+  scheduleFlush()
+}
+
+export async function removeImportedFile(absPath) {
+  const s = await load()
+  delete s.importedFiles[absPath]
   scheduleFlush()
 }
 

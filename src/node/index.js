@@ -42,6 +42,12 @@ export function apply(ctx, config) {
       error('session hook unavailable:', e.message)
     }
     disposers.push(sse.startHeartbeat())
+    try {
+      const { startWatcher } = await import('./importer.js')
+      disposers.push(startWatcher())
+    } catch (e) {
+      error('folder watcher unavailable:', e.message)
+    }
     log('dsh-literature host half ready')
   })().catch((e) => error('dsh-literature startup failed:', e?.stack ?? e))
 

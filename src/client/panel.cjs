@@ -4,7 +4,7 @@ const { useState, useEffect, useRef, useSyncExternalStore, useCallback } = React
 
 const store = require('./store.cjs')
 const { t } = require('./i18n.cjs')
-const { Icon, Spinner, Badge, Button, IconButton, EmptyState, ProgressBar } = require('./ui.cjs')
+const { Icon, Spinner, Badge, Button, IconButton, EmptyState, ProgressBar, Dropdown, copyText } = require('./ui.cjs')
 const { api } = require('./api.cjs')
 const { createViewer } = require('./pdf/viewer.cjs')
 const { SettingsPage } = require('./settings.cjs')
@@ -51,6 +51,49 @@ function identifierLine(item) {
   if (item.pmid) bits.push(`PMID:${item.pmid}`)
   if (!bits.length && item.rawValue) bits.push(item.rawValue)
   return bits.join('  ')
+}
+
+/** Builds the citation dropdown items for a card. */
+function citeMenuFor(item) {
+  const run = async (opts, label) => {
+    try {
+      const { text } = await store.citeItem(item.key, opts)
+      await copyText(text)
+      store.flash(`${label} 已复制`)
+    } catch (e) {
+      store.flash(e.message)
+    }
+  }
+  const promptPages = (style, label) => {
+    const pages = window.prompt('页码（如 12-15）', '12')
+    if (pages) run({ style, mode: 'direct', pages }, label)
+  }
+  return [
+    { label: t('cite.reference'), hint: 'APA 7th', onClick: () => run({ style: 'apa', mode: 'reference' }, 'APA') },
+    { label: t('cite.reference'), hint: 'GB/T 7714', onClick: () => run({ style: 'gb', mode: 'reference' }, 'GB/T 7714') },
+    { label: t('cite.reference'), hint: 'MLA 9th', onClick: () => run({ style: 'mla', mode: 'reference' }, 'MLA') },
+    { label: t('cite.reference'), hint: 'Chicago 17th', onClick: () => run({ style: 'chicago', mode: 'reference' }, 'Chicago') },
+    { divider: true },
+    { label: t('cite.intext'), hint: 'APA', onClick: () => run({ style: 'apa', mode: 'intext' }, t('cite.intext')) },
+    { label: t('cite.intext'), hint: 'GB/T', onClick: () => run({ style: 'gb', mode: 'intext' }, t('cite.intext')) },
+    { divider: true },
+    { label: t('cite.direct'), hint: 'APA', onClick: () => promptPages('apa', t('cite.direct')) },
+    { label: t('cite.direct'), hint: 'GB/T', onClick: () => promptPages('gb', t('cite.direct')) },
+  ]
+}
+
+/** Search the item on external services (Scholar / Baidu / CNKI). */
+function searchMenuFor(item) {
+  const q = encodeURIComponent(item.record?.title || item.title || item.rawValue || '')
+  const sourceUrl = item.record?.url || (item.doi ? `https://doi.org/${item.doi}` : '')
+  const open = (url) => window.open(url, '_blank')
+  return [
+    { label: t('search.scholar'), onClick: () => open(`https://scholar.google.com/scholar?q=${q}`) },
+    { label: t('search.baidu'), onClick: () => open(`https://xueshu.baidu.com/s?wd=${q}`) },
+    { label: t('search.cnki'), onClick: () => open(`https://search.cnki.com.cn/Search/Result?content=${q}`) },
+    sourceUrl ? { divider: true } : null,
+    sourceUrl ? { label: t('search.source'), onClick: () => open(sourceUrl) } : null,
+  ].filter(Boolean)
 }
 
 function ItemCard({ item }) {
@@ -107,6 +150,24 @@ function ItemCard({ item }) {
     actions.push(h(Button, { key: 'diff', onClick: () => store.showDiff(item.key) }, t('action.diff')))
   }
   actions.push(h(Button, { key: 'discard', variant: 'ghost', onClick: () => store.discardItem(item.key) }, t('action.discard')))
+  if (item.record) {
+    actions.push(
+      h(Dropdown, {
+        key: 'cite',
+        align: 'left',
+        trigger: (setOpen, open) =>
+          h(IconButton, { title: t('cite.title'), onClick: () => setOpen(!open) }, h(Icon.Quote, { size: 15 })),
+        items: citeMenuFor(item),
+      }),
+      h(Dropdown, {
+        key: 'search',
+        align: 'left',
+        trigger: (setOpen, open) =>
+          h(IconButton, { title: t('search.title'), onClick: () => setOpen(!open) }, h(Icon.Search, { size: 15 })),
+        items: searchMenuFor(item),
+      }),
+    )
+  }
 
   const title = item.record?.title || item.title || item.display || item.rawValue || 'Untitled'
 
@@ -154,6 +215,7 @@ function ItemList() {
 }
 
 function SearchBar() {
+  const state = useStore()
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const submit = async () => {
@@ -165,6 +227,32 @@ function SearchBar() {
     } finally {
       setBusy(false)
     }
+  }
+  const importMenu = () => {
+    const runScan = async () => {
+      if (!state.config?.importDir) {
+        store.flash(t('importNoDir'))
+        return
+      }
+      try {
+        const r = await store.scanDir(state.config.importDir)
+        store.flash(`${t('importDir')}：新增 ${r.imported?.length ?? 0} 条`)
+      } catch (e) {
+        store.flash(e.message)
+      }
+    }
+    const runZotero = async () => {
+      try {
+        const r = await store.importZotero(50)
+        store.flash(`${t('importZotero')}：新增 ${r.count ?? 0} 条`)
+      } catch (e) {
+        store.flash(e.message)
+      }
+    }
+    return [
+      { label: t('importDir'), hint: state.config?.importDir || t('importNoDirHint'), onClick: runScan },
+      { label: t('importZotero'), hint: t('importZoteroHint'), onClick: runZotero },
+    ]
   }
   return h(
     'div',
@@ -179,6 +267,12 @@ function SearchBar() {
       },
     }),
     h(Button, { onClick: submit, loading: busy, disabled: !text.trim() }, t('empty.add')),
+    h(Dropdown, {
+      align: 'right',
+      trigger: (setOpen, open) =>
+        h(IconButton, { title: t('importMenu'), onClick: () => setOpen(!open) }, h(Icon.Folder, { size: 15 })),
+      items: importMenu(),
+    }),
   )
 }
 
@@ -457,6 +551,7 @@ function Panel({ onClose, embedded = false }) {
     },
     h(PanelHeader, { onClose, embedded }),
     !state.loaded && state.loadError ? h('div', { className: 'zt-banner' }, t('banner.offline')) : null,
+    state.flash ? h('div', { className: 'zt-toast' }, state.flash) : null,
     needZotero && !zoteroRunning ? h('div', { className: 'zt-banner' }, t('banner.zoteroDown')) : null,
     h('div', { className: 'zt-body' },
       state.view === 'list' ? h(SearchBar, { key: 'search' }) : null,

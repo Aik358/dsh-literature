@@ -54,6 +54,9 @@ const DEFAULTS = {
   /** Entry placement: 'auto' (better-sidebar tab when available, else footer),
    *  'footer' (always the sidebar footer button), 'hide' (settings page only). */
   entryMode: 'auto',
+  /** Watched folder: new PDFs here are auto-imported into the built-in library. */
+  importDir: '',
+  watchImport: false,
 }
 
 function merge(base, patch) {

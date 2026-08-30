@@ -35,6 +35,9 @@ const api = {
   retry: (key) => request('/retry', { method: 'POST', body: { key } }),
   diff: (key) => request('/diff', { method: 'POST', body: { key } }),
   discard: (key) => request('/discard', { method: 'POST', body: { key } }),
+  cite: (key, opts = {}) => request('/cite', { method: 'POST', body: { key, ...opts } }),
+  scanDir: (dir) => request('/scan-dir', { method: 'POST', body: { dir } }),
+  importZotero: (limit = 50) => request('/import-zotero', { method: 'POST', body: { limit } }),
   /** Uploads a locally-downloaded PDF for a paywalled / needs-login entry. */
   importPdf: async (key, file, { autoSave = true } = {}) => {
     const res = await fetch(`${BASE}/import?key=${encodeURIComponent(key)}&filename=${encodeURIComponent(file.name)}&autoSave=${autoSave ? 1 : 0}`, {

@@ -62,6 +62,8 @@ const Icon = {
   Toc: (props) => svg([h('path', { d: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01' })], props?.size),
   Book: (props) => svg([h('path', { d: 'M4 19.5A2.5 2.5 0 016.5 17H20M4 19.5A2.5 2.5 0 006.5 22H20V2H6.5A2.5 2.5 0 004 4.5z' })], props?.size),
   Panel: (props) => svg([h('rect', { x: 3, y: 3, width: 18, height: 18, rx: 2 }), h('path', { d: 'M9 3v18' })], props?.size),
+  Quote: (props) =>
+    svg([h('path', { d: 'M10 11H6a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2v6a4 4 0 01-4 4M21 11h-4a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2v6a4 4 0 01-4 4' })], props?.size),
 }
 
 function Spinner({ size = 16 }) {
@@ -146,9 +148,78 @@ function EmptyState({ onScan }) {
   )
 }
 
+/**
+ * Lightweight dropdown menu: `trigger` is a render-prop (setOpen, open),
+ * `items` is a list of { label, hint?, icon?, onClick?, divider? }.
+ */
+function Dropdown({ trigger, items, align = 'left' }) {
+  const [open, setOpen] = React.useState(false)
+  const ref = React.useRef(null)
+  React.useEffect(() => {
+    if (!open) return
+    const onDoc = (e) => {
+      if (!ref.current?.contains(e.target)) setOpen(false)
+    }
+    const onEsc = (e) => e.key === 'Escape' && setOpen(false)
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onEsc)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onEsc)
+    }
+  }, [open])
+
+  return h(
+    'span',
+    { ref, style: { position: 'relative', display: 'inline-flex' } },
+    trigger(setOpen, open),
+    open
+      ? h(
+          'div',
+          { className: 'zt-menu', 'data-align': align },
+          ...items.map((it, i) =>
+            it.divider
+              ? h('div', { key: i, className: 'zt-menu-divider' })
+              : h(
+                  'button',
+                  {
+                    key: i,
+                    className: 'zt-menu-item',
+                    type: 'button',
+                    onClick: () => {
+                      setOpen(false)
+                      it.onClick?.()
+                    },
+                  },
+                  it.icon ? h('span', { className: 'zt-menu-icon' }, it.icon) : null,
+                  h('span', { className: 'zt-menu-label' }, it.label),
+                  it.hint ? h('span', { className: 'zt-menu-hint' }, it.hint) : null,
+                ),
+          ),
+        )
+      : null,
+  )
+}
+
+/** Clipboard with a legacy fallback (the host is a Chromium renderer). */
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    document.execCommand('copy')
+    ta.remove()
+  }
+}
+
 function ProgressBar({ value }) {
   const pct = Math.max(0, Math.min(100, value ?? 0))
   return h('div', { className: 'zt-progress' }, h('i', { style: { width: `${pct}%` } }))
 }
 
-module.exports = { Icon, Spinner, Badge, Button, IconButton, EmptyState, ProgressBar }
+module.exports = { Icon, Spinner, Badge, Button, IconButton, EmptyState, ProgressBar, Dropdown, copyText }

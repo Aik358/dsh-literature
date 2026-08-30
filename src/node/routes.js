@@ -234,6 +234,40 @@ export async function handler(req, res) {
       return
     }
 
+    if (head === 'cite' && methodOk(req, 'POST')) {
+      const body = await readJsonBody(req)
+      const item = await store.getItem(String(body?.key ?? ''))
+      if (!item?.record) {
+        writeJson(res, 404, { error: '条目缺少元数据，无法生成引用' })
+        return
+      }
+      const { cite } = await import('./cite.js')
+      const text = cite(item.record, {
+        style: body?.style ?? 'apa',
+        mode: body?.mode ?? 'reference',
+        pages: body?.pages,
+      })
+      writeJson(res, 200, { text, style: body?.style ?? 'apa', mode: body?.mode ?? 'reference' })
+      return
+    }
+
+    if (head === 'scan-dir' && methodOk(req, 'POST')) {
+      const body = await readJsonBody(req)
+      const { importDir } = await import('./importer.js')
+      const config = await loadConfig()
+      const result = await importDir(body?.dir || config.importDir, { autoResolve: body?.autoResolve !== false })
+      writeJson(res, 200, result)
+      return
+    }
+
+    if (head === 'import-zotero' && methodOk(req, 'POST')) {
+      const body = await readJsonBody(req)
+      const { importFromZotero } = await import('./importer.js')
+      const result = await importFromZotero({ limit: Number(body?.limit ?? 50) })
+      writeJson(res, 200, result)
+      return
+    }
+
     if (head === 'import' && methodOk(req, 'POST')) {
       // Paywalled / needs-login fallback: the user downloads the PDF in their
       // own browser and hands it to the panel. Body is the raw PDF bytes.

@@ -30,6 +30,7 @@ let state = {
   busy: {},
   loaded: false,
   loadError: '',
+  flash: '',
   // panel geometry, restored from localStorage
   geometry: {
     x: persisted.x ?? null,
@@ -117,6 +118,29 @@ async function scanText(text) {
   }
   await refresh()
   return created ?? []
+}
+
+let flashTimer = null
+function flash(message) {
+  set({ flash: message })
+  clearTimeout(flashTimer)
+  flashTimer = setTimeout(() => set({ flash: '' }), 2400)
+}
+
+async function scanDir(dir) {
+  const result = await api.scanDir(dir)
+  await refresh()
+  return result
+}
+
+async function importZotero(limit = 50) {
+  const result = await api.importZotero(limit)
+  await refresh()
+  return result
+}
+
+async function citeItem(key, opts) {
+  return api.cite(key, opts)
 }
 
 async function importPdf(key, file, opts) {
@@ -258,6 +282,10 @@ const store = {
   retryItem,
   discardItem,
   importPdf,
+  scanDir,
+  importZotero,
+  citeItem,
+  flash,
   showDiff,
   openPanel,
   closePanel,
