@@ -6,7 +6,7 @@ const store = require('./store.cjs')
 const { t } = require('./i18n.cjs')
 const { Icon, Spinner, Badge, Button, IconButton, EmptyState, ProgressBar, Dropdown, copyText } = require('./ui.cjs')
 const { api } = require('./api.cjs')
-const { createViewer } = require('./pdf/viewer.cjs')
+const { createViewer, COLORS } = require('./pdf/viewer.cjs')
 const { SettingsPage } = require('./settings.cjs')
 const { ConflictDiff } = require('./diff.cjs')
 
@@ -99,7 +99,8 @@ function searchMenuFor(item) {
 function ItemCard({ item }) {
   const busy = store.isBusy(item.key)
   const task = store.getSnapshot().tasks[item.key]
-  const error = item.error?.message ?? (item.state.endsWith('_failed') ? t('state.' + item.state) : '')
+  const stateStr = String(item.state ?? '')
+  const error = item.error?.message ?? (stateStr.endsWith('_failed') ? t('state.' + stateStr) : '')
   const tone = STATE_TONE[item.state] ?? 'info'
 
   const actions = []
@@ -182,7 +183,16 @@ function ItemCard({ item }) {
 
   return h(
     'div',
-    { className: 'zt-card', 'data-state': item.state, onClick: () => item.pdf?.path && store.selectItem(item.key, 'reader') },
+    {
+      className: 'zt-card',
+      'data-state': item.state,
+      // Open the reader only when the click landed on the card body itself —
+      // button / dropdown clicks must never bubble into navigation.
+      onClick: (e) => {
+        if (e.target.closest('button, input, select, textarea, a')) return
+        if (item.pdf?.path) store.selectItem(item.key, 'reader')
+      },
+    },
     h('div', { className: 'zt-row', style: { justifyContent: 'space-between', marginBottom: 4 } },
       h('div', { className: 'zt-row', style: { minWidth: 0 } },
         h(Badge, { tone }, t('state.' + item.state)),
@@ -304,6 +314,7 @@ function SearchBar() {
     }
   }
   const importMenu = () => {
+    const zoteroRunning = state.zotero?.running === true
     const runScan = async () => {
       if (!state.config?.importDir) {
         store.flash(t('importNoDir'))
@@ -326,7 +337,12 @@ function SearchBar() {
     }
     return [
       { label: t('importDir'), hint: state.config?.importDir || t('importNoDirHint'), onClick: runScan },
-      { label: t('importZotero'), hint: t('importZoteroHint'), onClick: runZotero },
+      {
+        label: t('importZotero'),
+        hint: zoteroRunning ? t('importZoteroHint') : t('importZoteroDown'),
+        disabled: !zoteroRunning,
+        onClick: zoteroRunning ? runZotero : () => store.flash(t('banner.zoteroDown')),
+      },
     ]
   }
   return h(
@@ -437,11 +453,54 @@ function Reader({ item }) {
   const [mode, setMode] = useState('fit-width')
   const [tocOpen, setTocOpen] = useState(false)
   const [outline, setOutline] = useState([])
+  const [searchOpen, setSearchOpen] = useState(false)
   const [searchQ, setSearchQ] = useState('')
   const [matches, setMatches] = useState([])
   const [annotations, setAnnotations] = useState([])
+  // AI assist: selection action bar, highlight action bar, ask-AI dialog.
+  const [selMenu, setSelMenu] = useState(null)
+  const [hlMenu, setHlMenu] = useState(null)
+  const [aiOpen, setAiOpen] = useState(false)
+  const [aiQ, setAiQ] = useState('')
+  const [aiBusy, setAiBusy] = useState(false)
 
   const pdfUrl = item.pdf?.path ? api.pdfUrl(item.key) : item.zotero?.key ? api.zoteroPdfUrl(item.zotero.key) : null
+
+  const runAi = async (opts) => {
+    setAiBusy(true)
+    try {
+      await store.askAi(item.key, opts)
+      store.flash(t('ai.sending'))
+      setSelMenu(null)
+      setHlMenu(null)
+      setAiOpen(false)
+      setAiQ('')
+    } catch (e) {
+      store.flash(e.message)
+    } finally {
+      setAiBusy(false)
+    }
+  }
+  const highlightSelection = () => {
+    if (!selMenu || !ctrlRef.current) return
+    const ctrl = ctrlRef.current
+    const annotation = ctrl.addHighlight({
+      pageIndex: selMenu.pageIndex,
+      rects: selMenu.rects,
+      text: selMenu.text,
+      color: COLORS[(annotations.length + 1) % COLORS.length],
+      note: '',
+    })
+    // addHighlight already emits 'annotation', which the handler below uses
+    // to persist; just close the bar.
+    void annotation
+    setSelMenu(null)
+  }
+  const deleteHighlight = (id) => {
+    ctrlRef.current?.removeHighlight(id)
+    api.removeAnnotation(item.key, id).catch(() => {})
+    setHlMenu(null)
+  }
 
   useEffect(() => {
     if (!pdfUrl) return undefined
@@ -472,7 +531,19 @@ function Reader({ item }) {
           setMode(ctrl.getMode())
         })
         ctrl.on('annotation', (annotation) => {
+          // Keep the on-screen note list in sync immediately; the server write
+          // is best-effort (the shadow store persists it).
+          setAnnotations((prev) => [...prev, annotation])
           api.addAnnotation(item.key, annotation).catch(() => {})
+        })
+        ctrl.on('annotations-changed', (list) => setAnnotations(list))
+        ctrl.on('selection', (s) => {
+          setSelMenu(s)
+          setHlMenu(null)
+        })
+        ctrl.on('highlight-click', ({ annotation: a, x, y }) => {
+          setHlMenu({ annotation: a, x, y })
+          setSelMenu(null)
         })
       } catch (e) {
         setError(e?.message ?? String(e))
@@ -483,6 +554,8 @@ function Reader({ item }) {
       disposed = true
       ctrl?.destroy()
       ctrlRef.current = null
+      setSelMenu(null)
+      setHlMenu(null)
     }
   }, [pdfUrl, item.key])
 
@@ -502,13 +575,89 @@ function Reader({ item }) {
     }
   }
 
+  // First click reveals the search box (so the user can type); once the box is
+  // open, clicking the toolbar button re-runs the current query.
+  const toggleSearch = () => {
+    if (!searchOpen) {
+      setSearchOpen(true)
+      setMatches([])
+      return
+    }
+    doSearch()
+  }
+
+  const toggleToc = () => {
+    if (!tocOpen && !outline.length) {
+      store.flash(t('reader.noOutline'))
+      return
+    }
+    setTocOpen((v) => !v)
+  }
+
+  // Clicking anywhere that is not the floating bars dismisses them; the bars
+  // themselves stop propagation so their buttons survive the click.
+  const dismissFloaters = (e) => {
+    if (e.target.closest('.zt-ai-float')) return
+    setSelMenu(null)
+    setHlMenu(null)
+  }
+
   if (!pdfUrl) {
     return h('div', { className: 'zt-empty' }, h('h4', null, t('reader.notDownloaded')), h('p', null, t('action.download')))
   }
 
+  // Convert viewport coordinates from the viewer into the scroll container's
+  // content coordinates, so the floating bars stay glued to the selection
+  // (and survive the host's transforms, which would break position:fixed).
+  const toScrollCoords = (pt) => {
+    const el = scrollRef.current
+    if (!el || !pt) return null
+    const r = el.getBoundingClientRect()
+    return {
+      left: Math.max(4, Math.min(pt.x - r.left + el.scrollLeft - 96, Math.max(4, el.clientWidth - 300))),
+      top: Math.max(4, pt.y - r.top + el.scrollTop - 46),
+    }
+  }
+  const selPos = toScrollCoords(selMenu)
+  const hlPos = toScrollCoords(hlMenu)
+
+  const selectionBar = selMenu && selPos
+    ? h('div', { className: 'zt-ai-float', style: { left: selPos.left, top: selPos.top } },
+        h('button', { type: 'button', className: 'zt-ai-float-btn', onClick: () => runAi({ action: 'translate', selection: selMenu.text }) }, t('ai.translate')),
+        h('button', { type: 'button', className: 'zt-ai-float-btn', onClick: () => runAi({ action: 'explain', selection: selMenu.text }) }, t('ai.explain')),
+        h('button', { type: 'button', className: 'zt-ai-float-btn', onClick: () => runAi({ action: 'summarize', selection: selMenu.text }) }, t('ai.summarize')),
+        h('button', { type: 'button', className: 'zt-ai-float-btn zt-ai-float-btn-accent', onClick: highlightSelection }, t('ai.highlight')),
+      )
+    : null
+
+  const highlightBar = hlMenu && hlPos
+    ? h('div', { className: 'zt-ai-float', style: { left: hlPos.left, top: hlPos.top } },
+        h('span', { className: 'zt-hl-float-text', title: hlMenu.annotation?.text ?? '' }, (hlMenu.annotation?.text ?? '').slice(0, 24)),
+        h('button', { type: 'button', className: 'zt-ai-float-btn', onClick: () => ctrlRef.current?.goToPage(hlMenu.annotation.pageIndex + 1) }, t('ai.jump')),
+        h('button', { type: 'button', className: 'zt-ai-float-btn zt-ai-float-btn-danger', onClick: () => deleteHighlight(hlMenu.annotation.id) }, t('reader.deleteAnnotation')),
+      )
+    : null
+
+  const aiPanel = aiOpen
+    ? h('div', { className: 'zt-ai-ask' },
+        h('input', {
+          className: 'zt-input',
+          autoFocus: true,
+          placeholder: t('ai.placeholder'),
+          value: aiQ,
+          onChange: (e) => setAiQ(e.target.value),
+          onKeyDown: (e) => {
+            if (e.key === 'Enter' && aiQ.trim()) runAi({ action: 'ask', question: aiQ })
+            if (e.key === 'Escape') setAiOpen(false)
+          },
+        }),
+        h(Button, { variant: 'primary', disabled: !aiQ.trim() || aiBusy, loading: aiBusy, onClick: () => runAi({ action: 'ask', question: aiQ }) }, t('ai.ask')),
+      )
+    : null
+
   return h(
     'div',
-    { className: 'zt-reader' },
+    { className: 'zt-reader', onMouseDown: dismissFloaters },
     h(
       'div',
       { className: 'zt-toolbar' },
@@ -517,11 +666,13 @@ function Reader({ item }) {
       h('span', { style: { fontSize: 12, color: 'var(--dsw-alias-label-secondary, #666)', whiteSpace: 'nowrap' } }, `${page}${t('reader.of')}${total || '–'}`),
       h(IconButton, { title: t('reader.next'), disabled: page >= total, onClick: () => ctrlRef.current?.goToPage(page + 1) }, h(Icon.ChevronRight, { size: 16 })),
       h('span', { style: { flex: 1 } }),
+      h(IconButton, { title: t('ai.tldr'), disabled: aiBusy, onClick: () => runAi({ action: 'tldr' }) }, h(Icon.Summarize, { size: 16 })),
+      h(IconButton, { title: t('ai.askHint'), disabled: aiBusy, onClick: () => setAiOpen((v) => !v) }, h(Icon.Sparkle, { size: 16 })),
       h(IconButton, { title: t('reader.zoomOut'), onClick: () => ctrlRef.current?.setScale(1 / 1.2) }, h(Icon.Minus, { size: 16 })),
       h('span', { style: { fontSize: 12, color: 'var(--dsw-alias-label-tertiary, #8a8a8a)' } }, `${Math.round(scale * 100)}%`),
       h(IconButton, { title: t('reader.zoomIn'), onClick: () => ctrlRef.current?.setScale(1.2) }, h(Icon.Plus, { size: 16 })),
-      h(IconButton, { title: t('reader.toc'), onClick: () => setTocOpen((v) => !v) }, h(Icon.Toc, { size: 16 })),
-      h(IconButton, { title: t('reader.search'), onClick: doSearch }, h(Icon.Search, { size: 16 })),
+      h(IconButton, { title: t('reader.toc'), onClick: toggleToc }, h(Icon.Toc, { size: 16 })),
+      h(IconButton, { title: t('reader.search'), onClick: toggleSearch }, h(Icon.Search, { size: 16 })),
     ),
     tocOpen && outline.length
       ? h(
@@ -537,22 +688,40 @@ function Reader({ item }) {
         )
       : null,
     tocOpen && !outline.length ? h('div', { className: 'zt-toc' }, h('div', { className: 'zt-hint' }, '（无目录）')) : null,
-    searchQ
+    searchOpen
       ? h(
           'div',
           { className: 'zt-toc' },
           h('div', { className: 'zt-row' },
-            h('input', { className: 'zt-input', placeholder: t('reader.search'), value: searchQ, onChange: (e) => setSearchQ(e.target.value), onKeyDown: (e) => e.key === 'Enter' && doSearch() }),
+            h('input', {
+              className: 'zt-input',
+              autoFocus: true,
+              placeholder: t('reader.search'),
+              value: searchQ,
+              onChange: (e) => setSearchQ(e.target.value),
+              onKeyDown: (e) => {
+                if (e.key === 'Enter') doSearch()
+                if (e.key === 'Escape') setSearchOpen(false)
+              },
+            }),
             h(Button, { onClick: doSearch }, t('reader.search')),
           ),
           matches.length
             ? matches.slice(0, 20).map((m, i) => h('button', { key: i, onClick: () => ctrlRef.current?.goToPage(m.page) }, `p.${m.page}  ${m.preview}`))
-            : h('div', { className: 'zt-hint' }, '0 结果'),
+            : searchQ
+              ? h('div', { className: 'zt-hint' }, '0 结果')
+              : null,
         )
       : null,
+    aiPanel,
     error ? h('div', { className: 'zt-error', style: { padding: 16 } }, error) : null,
     !ready && !error ? h('div', { className: 'zt-empty' }, h(Spinner, { size: 20 }), h('p', null, t('reader.loading'))) : null,
-    h('div', { className: 'zt-reader-scroll', ref: scrollRef, onScroll: updatePage }),
+    // The floating bars live INSIDE the scroll container so they inherit its
+    // positioning context (the container is the positioned ancestor).
+    h('div', { className: 'zt-reader-scroll', ref: scrollRef, onScroll: (e) => { updatePage(); setSelMenu(null); setHlMenu(null) } },
+      selectionBar,
+      highlightBar,
+    ),
     annotations.length
       ? h(
           'div',
@@ -605,21 +774,47 @@ function PanelBody() {
   if (state.view === 'reader') {
     const item = state.items.find((i) => i.key === state.selectedKey)
     if (item) return h(Reader, { key: item.key, item })
+    // The entry vanished (removed elsewhere); fall back to the list view
+    // instead of leaving the reader shell rendered with no document.
+    return h(ItemList, { key: 'list' })
+  }
+  if (state.searchResults?.length) {
     return h('div', { key: 'listwrap', style: { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 } },
-    state.searchResults?.length ? h(CandidateList, { key: 'candidates' }) : null,
-    h(ItemList, { key: 'list' }),
-  )
+      h(CandidateList, { key: 'candidates' }),
+      h(ItemList, { key: 'list' }),
+    )
   }
   return h(ItemList, { key: 'list' })
 }
 
 function Panel({ onClose, embedded = false }) {
   const state = useStore()
+  // Connect the SSE progress stream while the panel is mounted and release it
+  // on unmount (panel closed / tab hidden). Keeping a permanently-open stream
+  // drains the browser's same-origin connection pool (~6), which queues PDF
+  // fetches behind it — the reader appears to hang on "正在加载 PDF…" until a
+  // page reload frees the sockets.
+  useEffect(() => {
+    store.ensureEvents()
+    return () => store.releaseEvents()
+  }, [])
   if (!state.open && !embedded) return null
 
   const zoteroRunning = state.zotero?.running === true
   // Warn only when the current mode actually depends on the external app.
   const needZotero = state.config?.saveMode === 'zotero'
+
+  // The banner must not linger after a successful built-in import: it only
+  // means "the configured save target is unreachable", and switching the
+  // target one click away fixes it.
+  const switchToBuiltin = async () => {
+    try {
+      await store.saveConfig({ saveMode: 'builtin' })
+      store.flash(t('banner.switched'))
+    } catch (e) {
+      store.flash(e.message)
+    }
+  }
 
   return h(
     'div',
@@ -630,7 +825,12 @@ function Panel({ onClose, embedded = false }) {
     h(PanelHeader, { onClose, embedded }),
     !state.loaded && state.loadError ? h('div', { className: 'zt-banner' }, t('banner.offline')) : null,
     state.flash ? h('div', { className: 'zt-toast' }, state.flash) : null,
-    needZotero && !zoteroRunning ? h('div', { className: 'zt-banner' }, t('banner.zoteroDown')) : null,
+    needZotero && !zoteroRunning
+      ? h('div', { className: 'zt-banner zt-banner-row' },
+          h('span', { style: { flex: 1, minWidth: 0 } }, t('banner.zoteroDown')),
+          h('button', { className: 'zt-btn zt-banner-btn', type: 'button', onClick: switchToBuiltin }, t('banner.switchBuiltin')),
+        )
+      : null,
     h('div', { className: 'zt-body' },
       state.view === 'list' ? h(SearchBar, { key: 'search' }) : null,
       h(PanelBody, { key: 'body' }),

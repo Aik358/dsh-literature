@@ -58,9 +58,11 @@ const zh = {
     saveAnyway: '仍然保存',
   },
   banner: {
-    zoteroDown: '文献库未运行，无法读取或写入条目',
+    zoteroDown: '文献库未运行——保存到文献库会失败，可改用内置文献库',
     zoteroDownDir: '文献库未运行，可改为导出到目录',
     offline: '宿主不可达',
+    switchBuiltin: '改用内置库',
+    switched: '已切换到内置文献库',
   },
   reader: {
     fitWidth: '适应宽度',
@@ -76,6 +78,7 @@ const zh = {
     zoomIn: '放大',
     zoomOut: '缩小',
     close: '关闭阅读器',
+    noOutline: '该 PDF 没有目录',
     loading: '正在加载 PDF…',
     notDownloaded: '全文尚未下载',
     addNote: '添加笔记',
@@ -151,6 +154,7 @@ const zh = {
     title: '库中已有相似条目',
     subtitle: '字段差异如下，选择处理方式：',
     noDiff: '字段完全一致',
+    notSupported: '连接接口只支持新增，不支持更新/覆盖；如需覆盖请在文献库中手动处理',
   },
   cite: {
     title: '引用',
@@ -179,7 +183,27 @@ const zh = {
   importNoDirHint: '文件夹路径未配置',
   importZotero: '从本地文献库导入',
   importZoteroHint: '需要文献库应用运行',
+  importZoteroDown: '文献库未运行',
   status: { ready: '就绪', running: '文献库运行中', down: '文献库未运行' },
+  ai: {
+    ask: '问 AI',
+    askHint: '对当前文献提问，AI 会基于全文回答（发送到当前对话）',
+    tldr: '总结全文',
+    tldrHint: '让 AI 生成这篇文献的要点摘要（发送到当前对话）',
+    translate: '翻译',
+    explain: '解释',
+    summarize: '总结这段',
+    highlight: '高亮',
+    jump: '跳转',
+    selectionTitle: '划词操作',
+    placeholder: '就这篇文献提问…',
+    sending: '已发送到当前对话，AI 正在回答…',
+    noSession: '当前没有活跃对话，请先开始一个对话再试',
+    noText: '这篇 PDF 没有可提取的文本（可能是扫描件）',
+    noPdf: '该条目还没有 PDF 全文',
+    selectHint: '在阅读器中选中文字即可翻译 / 解释 / 总结',
+    toSession: '（已发送到当前对话）',
+  },
 }
 
 const en = {
@@ -240,9 +264,11 @@ const en = {
     saveAnyway: 'Save anyway',
   },
   banner: {
-    zoteroDown: 'Library is not running — cannot read or write items',
+    zoteroDown: 'Library is not running — saving to it will fail; you can switch to the built-in library',
     zoteroDownDir: 'Library is not running — you can export to a folder instead',
     offline: 'Host unreachable',
+    switchBuiltin: 'Use built-in',
+    switched: 'Switched to the built-in library',
   },
   reader: {
     fitWidth: 'Fit width',
@@ -258,6 +284,7 @@ const en = {
     zoomIn: 'Zoom in',
     zoomOut: 'Zoom out',
     close: 'Close reader',
+    noOutline: 'This PDF has no outline',
     loading: 'Loading PDF…',
     notDownloaded: 'Full text not downloaded yet',
     addNote: 'Add note',
@@ -333,6 +360,7 @@ const en = {
     title: 'A similar entry already exists',
     subtitle: 'Field differences — choose how to proceed:',
     noDiff: 'Fields are identical',
+    notSupported: 'The connector API can only create items, not update/overwrite — please handle the overlap in the library app manually',
   },
   cite: {
     title: 'Cite',
@@ -361,7 +389,27 @@ const en = {
   importNoDirHint: 'folder not configured',
   importZotero: 'Import from local library',
   importZoteroHint: 'needs the library app running',
+  importZoteroDown: 'Library not running',
   status: { ready: 'Ready', running: 'Library running', down: 'Library not running' },
+  ai: {
+    ask: 'Ask AI',
+    askHint: 'Ask about this paper — the AI answers from the full text (sent to the current chat)',
+    tldr: 'Summarize paper',
+    tldrHint: 'Have the AI produce a key-point summary of this paper (sent to the current chat)',
+    translate: 'Translate',
+    explain: 'Explain',
+    summarize: 'Summarize',
+    highlight: 'Highlight',
+    jump: 'Jump',
+    selectionTitle: 'Selection actions',
+    placeholder: 'Ask about this paper…',
+    sending: 'Sent to the current chat — the AI is answering…',
+    noSession: 'No active chat — start a conversation first',
+    noText: 'No extractable text in this PDF (may be a scan)',
+    noPdf: 'This item has no PDF full text yet',
+    selectHint: 'Select text in the reader to translate / explain / summarize',
+    toSession: ' (sent to the current chat)',
+  },
 }
 
 const TABLES = { zh, en }

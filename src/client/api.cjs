@@ -6,13 +6,34 @@
 
 const BASE = '/api/dsh-literature'
 
+// Every request gets a hard timeout: a hung host (or a wedged route) must
+// surface as an error, never as an eternal spinner / dead click. 15s is far
+// beyond anything a loopback route needs.
+const REQUEST_TIMEOUT_MS = 15000
+
 async function request(path, { method = 'GET', body, signal } = {}) {
-  const res = await fetch(BASE + path, {
-    method,
-    headers: body ? { 'content-type': 'application/json' } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
-    signal,
-  })
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  const onAbort = () => controller.abort()
+  if (signal) {
+    if (signal.aborted) controller.abort()
+    else signal.addEventListener('abort', onAbort, { once: true })
+  }
+  let res
+  try {
+    res = await fetch(BASE + path, {
+      method,
+      headers: body ? { 'content-type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    })
+  } catch (e) {
+    if (e?.name === 'AbortError' && !signal?.aborted) throw new Error('请求超时，请重试')
+    throw new Error(e?.message ?? String(e))
+  } finally {
+    clearTimeout(timer)
+    if (signal) signal.removeEventListener('abort', onAbort)
+  }
   const text = await res.text()
   let parsed = {}
   try {
@@ -41,11 +62,22 @@ const api = {
   searchCandidates: (q, rows = 8) => request('/search', { method: 'POST', body: { q, rows } }),
   addCandidate: (candidate) => request('/add-candidate', { method: 'POST', body: { candidate } }),
   dropPdf: async (file) => {
-    const res = await fetch(`${BASE}/drop?filename=${encodeURIComponent(file.name)}`, {
-      method: 'POST',
-      headers: { 'content-type': file.type || 'application/pdf' },
-      body: file,
-    })
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+    let res
+    try {
+      res = await fetch(`${BASE}/drop?filename=${encodeURIComponent(file.name)}`, {
+        method: 'POST',
+        headers: { 'content-type': file.type || 'application/pdf' },
+        body: file,
+        signal: controller.signal,
+      })
+    } catch (e) {
+      if (e?.name === 'AbortError') throw new Error('上传超时，请重试')
+      throw e
+    } finally {
+      clearTimeout(timer)
+    }
     const text = await res.text()
     let parsed = {}
     try {
@@ -58,11 +90,22 @@ const api = {
   },
   /** Uploads a locally-downloaded PDF for a paywalled / needs-login entry. */
   importPdf: async (key, file, { autoSave = true } = {}) => {
-    const res = await fetch(`${BASE}/import?key=${encodeURIComponent(key)}&filename=${encodeURIComponent(file.name)}&autoSave=${autoSave ? 1 : 0}`, {
-      method: 'POST',
-      headers: { 'content-type': file.type || 'application/pdf' },
-      body: file,
-    })
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+    let res
+    try {
+      res = await fetch(`${BASE}/import?key=${encodeURIComponent(key)}&filename=${encodeURIComponent(file.name)}&autoSave=${autoSave ? 1 : 0}`, {
+        method: 'POST',
+        headers: { 'content-type': file.type || 'application/pdf' },
+        body: file,
+        signal: controller.signal,
+      })
+    } catch (e) {
+      if (e?.name === 'AbortError') throw new Error('上传超时，请重试')
+      throw e
+    } finally {
+      clearTimeout(timer)
+    }
     const text = await res.text()
     let parsed = {}
     try {
@@ -81,35 +124,100 @@ const api = {
   removeAnnotation: (key, id) => request(`/annotations/${encodeURIComponent(key)}?id=${encodeURIComponent(id)}`, { method: 'DELETE' }),
   pdfUrl: (key) => `${BASE}/pdf/${encodeURIComponent(key)}`,
   zoteroPdfUrl: (key) => `${BASE}/zotero/file/${encodeURIComponent(key)}`,
+  /** AI assist: steers a reader question into the current DSH conversation. */
+  aiAsk: (payload) => request('/ai/ask', { method: 'POST', body: payload }),
+  aiSession: () => request('/ai/session'),
 }
 
 /**
  * Server-sent events for progress. `EventSource` reconnects on its own; the
  * host also sends a `retry:` directive so it backs off after a restart.
+ *
+ * Connection-pool safety: every SSE holds one browser HTTP connection, and
+ * browsers cap same-origin connections at ~6. If the host (or another plugin)
+ * wedges a stream, the EventSource retries in a loop and leaks connections —
+ * which makes every other request queue and time out. So after 3 consecutive
+ * drop/reconnect failures we degrade to a light 15s poll of `/state` and give
+ * the connection back. A stable stream resets the counter on any message.
  */
 function subscribe(onEvent, onError) {
-  if (typeof EventSource === 'undefined') return () => {}
-  const es = new EventSource(`${BASE}/events`)
-  const types = ['item', 'task', 'status', 'removed', 'hello']
-  const handlers = []
-  for (const type of types) {
-    const fn = (e) => {
-      let data = {}
-      try {
-        data = JSON.parse(e.data)
-      } catch {
-        data = {}
-      }
-      onEvent?.(type, data)
+  let pollTimer = null
+  let es = null
+  let esErrors = 0
+  let closed = false
+
+  const cleanup = () => {
+    closed = true
+    if (pollTimer) {
+      clearInterval(pollTimer)
+      pollTimer = null
     }
-    es.addEventListener(type, fn)
-    handlers.push([type, fn])
+    if (es) {
+      try {
+        es.close()
+      } catch {
+        /* already closed */
+      }
+      es = null
+    }
   }
-  if (onError) es.onerror = onError
-  return () => {
-    for (const [type, fn] of handlers) es.removeEventListener(type, fn)
-    es.close()
+
+  const startPolling = () => {
+    if (closed || pollTimer) return
+    if (es) {
+      try {
+        es.close()
+      } catch {
+        /* ignore */
+      }
+      es = null
+    }
+    console.warn('[dsh-literature] SSE degraded to 15s polling (connection pool pressure)')
+    const tick = async () => {
+      if (closed) return
+      try {
+        const snapshot = await api.state()
+        if (!closed) onEvent?.('poll', snapshot)
+      } catch {
+        /* transient — keep polling */
+      }
+    }
+    tick()
+    pollTimer = setInterval(tick, 15000)
   }
+
+  if (typeof EventSource === 'undefined') {
+    startPolling()
+    return cleanup
+  }
+
+  const open = () => {
+    if (closed) return
+    es = new EventSource(`${BASE}/events`)
+    const types = ['item', 'task', 'status', 'removed', 'hello']
+    for (const type of types) {
+      es.addEventListener(type, (e) => {
+        // Any real event means the stream is healthy — reset the drop counter.
+        esErrors = 0
+        let data = {}
+        try {
+          data = JSON.parse(e.data)
+        } catch {
+          data = {}
+        }
+        onEvent?.(type, data)
+      })
+    }
+    es.onerror = () => {
+      if (closed) return
+      esErrors += 1
+      onError?.()
+      if (esErrors >= 3) startPolling()
+    }
+  }
+  open()
+
+  return cleanup
 }
 
 module.exports = { api, subscribe, BASE }

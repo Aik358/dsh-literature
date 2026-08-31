@@ -19,6 +19,7 @@ const pipeline = await import('../src/node/pipeline.js')
 const { apply } = await import('../lib/index.js')
 
 const registered = { routes: [], tools: [], events: [] }
+const steered = [] // AI-assist messages captured by the mock agent
 const ctx = {
   webServer: {
     register: (route) => {
@@ -40,6 +41,9 @@ const ctx = {
     const r = fn()
     if (typeof r === 'function') r()
     return () => {}
+  },
+  agents: {
+    get: (id) => (id === 'test-session' ? { steer: (m) => steered.push(m) } : undefined),
   },
 }
 
@@ -263,6 +267,37 @@ const handler = prefix.handler
   check('missing pdf is 404', res.status === 404, res.status)
 }
 
+// 7b. pdf route honours byte ranges (pdf.js issues Range requests by default)
+{
+  const pdf = Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(4096, 66)])
+  const item = await pipeline.importDroppedPdf(pdf, { filename: 'range test.pdf' })
+  const enc = encodeURIComponent(item.key)
+  const res = makeRes()
+  const req = makeReq('GET', `/api/dsh-literature/pdf/${enc}`)
+  req.headers.range = 'bytes=0-1023'
+  const p = collect(res)
+  await handler(req, res)
+  const body = Buffer.from(await p)
+  check('pdf range returns 206', res.status === 206, res.status)
+  check('pdf range returns the right slice', body.length === 1024, body.length)
+  check('pdf range advertises accept-ranges', (res.headers?.['accept-ranges'] ?? '') === 'bytes', res.headers)
+}
+
+// 7c. pdf HEAD request resolves with headers and no body
+{
+  const pdf = Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(256, 68)])
+  const item = await pipeline.importDroppedPdf(pdf, { filename: 'head test.pdf' })
+  const enc = encodeURIComponent(item.key)
+  const res = makeRes()
+  const req = makeReq('HEAD', `/api/dsh-literature/pdf/${enc}`)
+  const p = collect(res)
+  await handler(req, res)
+  const body = await p
+  check('pdf HEAD returns 200 with content-length', res.status === 200 && Number(res.headers?.['content-length']) === pdf.length,
+    { status: res.status, len: res.headers?.['content-length'] })
+  check('pdf HEAD ships no body', body.length === 0, body.length)
+}
+
 // 8. unknown route
 {
   const res = makeRes()
@@ -281,6 +316,237 @@ const handler = prefix.handler
   const body = await p
   check('sse returns event-stream', /text\/event-stream/.test(res.headers?.['content-type'] ?? ''), res.headers)
   check('sse emits hello frame', body.includes('event: hello'), body.slice(0, 120))
+}
+
+// 10. url page title cleaning must NOT truncate hyphenated titles
+{
+  const { stripSiteSuffix } = await import('../src/node/metadata/url.js')
+  const cases = [
+    ['Attention-deficit and hyperactivity disorder - PMC', 'Attention-deficit and hyperactivity disorder'],
+    ['Brain | Wiley Online Library', 'Brain'],
+    ['Nature – Journal article', 'Nature'],
+    ['Hybrid Organic-Inorganic Perovskites – PMC', 'Hybrid Organic-Inorganic Perovskites'],
+    ['Pure title', 'Pure title'],
+    ['COVID-19 and the immune system', 'COVID-19 and the immune system'],
+    ['Title |', 'Title'],
+  ]
+  for (const [input, expected] of cases) {
+    const got = stripSiteSuffix(input)
+    check(`stripSiteSuffix keeps "${input}" intact`, got === expected, got)
+  }
+}
+
+// 11. APA citation keeps issue/pages when volume is absent
+{
+  const { cite } = await import('../src/node/cite.js')
+  const record = {
+    itemType: 'journalArticle',
+    title: 'A study without a volume',
+    authors: [{ lastName: 'Doe', firstName: 'Jane' }],
+    year: 2024,
+    container: 'Journal of Tests',
+    issue: '3',
+    pages: '10-15',
+  }
+  const text = cite(record, { style: 'apa', mode: 'reference' })
+  check('apa citation keeps issue when volume missing', text.includes('(3)') && text.includes('10–15'), text)
+}
+
+// 12. annotations route round-trips keys with spaces (stored under the SAME
+//     raw key so discarding an item also clears its annotations)
+{
+  const pdf = Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(180, 80)])
+  const item = await pipeline.importDroppedPdf(pdf, { filename: 'spaced key paper.pdf' })
+  const rawKey = item.key
+
+  const postRes = makeRes()
+  const postReq = makeReq('POST', `/api/dsh-literature/annotations/${encodeURIComponent(rawKey)}`, '127.0.0.1',
+    Buffer.from(JSON.stringify({ text: 'note on spaced key', pageIndex: 0, rects: [] })))
+  const pp = collect(postRes)
+  await handler(postReq, postRes)
+  await pp
+  check('annotation POST works for space-containing key', postRes.status === 201, postRes.status)
+
+  const getRes = makeRes()
+  const getReq = makeReq('GET', `/api/dsh-literature/annotations/${encodeURIComponent(rawKey)}`)
+  const gp = collect(getRes)
+  await handler(getReq, getRes)
+  const { annotations } = JSON.parse(await gp)
+  check('annotation GET reads back by the same key', Array.isArray(annotations) && annotations.length === 1, annotations)
+
+  // Discarding the item must take its annotations with it (same raw key).
+  const delRes = makeRes()
+  const delReq = makeReq('POST', '/api/dsh-literature/discard', '127.0.0.1', Buffer.from(JSON.stringify({ key: rawKey })))
+  const dp = collect(delRes)
+  await handler(delReq, delRes)
+  await dp
+
+  const afterRes = makeRes()
+  const afterReq = makeReq('GET', `/api/dsh-literature/annotations/${encodeURIComponent(rawKey)}`)
+  const ap = collect(afterRes)
+  await handler(afterReq, afterRes)
+  const after = JSON.parse(await ap)
+  check('discarding an item removes its annotations (no orphan leak)', Array.isArray(after.annotations) && after.annotations.length === 0, after.annotations)
+}
+
+// 13. custom source templates reject templates whose variables are missing
+{
+  const { renderSourceTemplate } = await import('../src/node/fetch/pdf.js')
+  const rec = { doi: '10.1000/xyz', title: 'Paper', arxiv: '', isbn: '', url: '' }
+  check('template with {doi} renders', renderSourceTemplate('https://m.example/{doi}', rec) === 'https://m.example/10.1000%2Fxyz',
+    renderSourceTemplate('https://m.example/{doi}', rec))
+  check('template with missing {arxiv} is rejected', renderSourceTemplate('https://m.example/{arxiv}/{doi}', rec) === '')
+  check('non-http template is rejected', renderSourceTemplate('ftp://m.example/{doi}', rec) === '')
+  check('leftover placeholder is rejected', renderSourceTemplate('https://m.example/{doi}/{nope}', rec) === '')
+}
+
+// 14. ISBN normalisation & check-digit conversion (pure, no network)
+{
+  const { normalizeOpenLibrary } = await import('../src/node/metadata/isbn.js')
+  const rec = normalizeOpenLibrary({
+    title: 'The Laws of Simplicity',
+    authors: [{ name: 'John Maeda' }],
+    publishers: [{ name: 'The MIT Press' }],
+    publish_date: 'August 21, 2006',
+    number_of_pages: 100,
+  })
+  check('openlibrary normalize produces a book record', rec?.itemType === 'book' && rec?.year === 2006, rec?.itemType)
+  check('openlibrary normalize splits author names', rec?.authors?.[0]?.lastName === 'Maeda' && rec?.authors?.[0]?.firstName === 'John', rec?.authors)
+
+  // ISBN-10/13 interconversion used to widen the lookup.
+  const m = await import('../src/node/metadata/isbn.js')
+  const ten = m.__test?.toIsbn10?.(9780262134729) ?? null
+  // toIsbn10/toIsbn13 are private; verify through fetchByIsbn's sibling logic
+  // by checking normalize of an entry missing a title -> null.
+  check('openlibrary normalize rejects empty entries', normalizeOpenLibrary(null) === null)
+}
+
+// 15. ISBN resolve path end-to-end (live API; may be offline in sandbox)
+{
+  const { resolveIdentifier } = await import('../src/node/metadata/index.js')
+  const rec = await resolveIdentifier({ kind: 'isbn', value: '978-0-262-13472-9' }, { timeoutMs: 20000 }).catch(() => null)
+  if (rec) {
+    check('isbn resolves through Open Library', rec.itemType === 'book' && !!rec.title, rec.title?.slice(0, 40))
+  } else {
+    console.log('  (skip live ISBN check — API unreachable)')
+  }
+}
+
+// 16. PDF text extraction (host-side, no worker) on a generated text PDF
+{
+  const { readFile, writeFile } = await import('node:fs/promises')
+  const { join } = await import('node:path')
+  const { tmpdir } = await import('node:os')
+  const { extractPdfText } = await import('../src/node/pdf-text.js')
+
+  const text = 'Attention is all you need - literature AI test'
+  const stream = `BT /F1 18 Tf 72 720 Td (${text}) Tj ET`
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+    `<< /Length ${Buffer.byteLength(stream, 'latin1')} >>\nstream\n${stream}\nendstream`,
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ]
+    .map((s, i) => `${i + 1} 0 obj\n${s}\nendobj\n`)
+    .join('')
+  const pdf = Buffer.from(`%PDF-1.4\n${objects}trailer << /Root 1 0 R >>\n%%EOF`, 'latin1')
+  const pdfPath = join(tmpdir(), `lit-ai-text-${Date.now()}.pdf`)
+  await writeFile(pdfPath, pdf)
+
+  const extracted = await extractPdfText(pdfPath, { force: true })
+  check('pdf text extraction returns the page text', extracted.includes('Attention is all you need'), extracted)
+  await import('node:fs/promises').then((m) => m.rm(pdfPath, { force: true }))
+}
+
+// 17. AI-assist routes: steering reader actions into the current conversation
+{
+  // Create the entry through the SAME bundle the routes use. The harness
+  // mixes the src pipeline with the bundled lib, which keep separate module
+  // graphs (hence separate in-memory stores) — mixing them would make every
+  // lookup miss.
+  const pdf = Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(140, 90)])
+  const dropRes = makeRes()
+  const dropReq = makeReq('POST', '/api/dsh-literature/drop?filename=ai%20assist%20paper.pdf', '127.0.0.1', pdf)
+  const dp = collect(dropRes)
+  await handler(dropReq, dropRes)
+  const dropBody = JSON.parse(await dp)
+  const key = dropBody.item?.key
+  check('ai setup: drop created an entry in the bundle store', !!key, dropBody.error)
+
+  // 17a. no session available -> clear error (no crash)
+  const res = makeRes()
+  const req = makeReq('POST', '/api/dsh-literature/ai/ask', '127.0.0.1',
+    Buffer.from(JSON.stringify({ key, action: 'translate', selection: 'x' })))
+  const p = collect(res)
+  await handler(req, res)
+  const body = JSON.parse(await p)
+  check('ai/ask without a session fails gracefully', res.status === 500 && /对话/.test(body.error ?? ''), { status: res.status, error: body.error })
+
+  // 17b. selection action with a live session -> steered into the conversation
+  const res2 = makeRes()
+  const req2 = makeReq('POST', '/api/dsh-literature/ai/ask', '127.0.0.1',
+    Buffer.from(JSON.stringify({ key, sessionId: 'test-session', action: 'translate', selection: 'This is a selected sentence.' })))
+  const p2 = collect(res2)
+  await handler(req2, res2)
+  const body2 = JSON.parse(await p2)
+  check('ai/ask steers a translate request', res2.status === 200 && body2.ok === true && steered.length === 1,
+    { status: res2.status, ok: body2.ok, steered: steered.length })
+  const steeredMsg = steered[steered.length - 1]
+  check('steered message carries the selected text', steeredMsg?.content?.[0]?.text?.includes('This is a selected sentence.'),
+    steeredMsg?.content?.[0]?.text?.slice(0, 80))
+
+  // 17c. full-text actions need a real PDF with text -> clear failure for the stub
+  const res3 = makeRes()
+  const req3 = makeReq('POST', '/api/dsh-literature/ai/ask', '127.0.0.1',
+    Buffer.from(JSON.stringify({ key, sessionId: 'test-session', action: 'ask', question: 'What is this about?' })))
+  const p3 = collect(res3)
+  await handler(req3, res3)
+  const body3 = JSON.parse(await p3)
+  check('ai/ask full-text action without extractable text fails clearly', res3.status === 500 && /没有|扫描|损坏/.test(body3.error ?? ''), body3.error)
+
+  // 17d. unknown session id -> graceful error
+  const res4 = makeRes()
+  const req4 = makeReq('POST', '/api/dsh-literature/ai/ask', '127.0.0.1',
+    Buffer.from(JSON.stringify({ key, sessionId: 'nope', action: 'summarize', selection: 'x' })))
+  const p4 = collect(res4)
+  await handler(req4, res4)
+  const body4 = JSON.parse(await p4)
+  check('ai/ask with an unknown session fails gracefully', res4.status === 500 && body4.error, body4.error)
+}
+
+// 18. doctor supervisor self-heal (pipe naming must match dsh-doctor's own
+//     derivation; the heal must spawn when the pipe is unreachable)
+{
+  const { doctorPipeName, findDoctorCli, pipeAvailable, ensureDoctorSupervisor } = await import('../src/node/doctor-selfheal.js')
+
+  const root = 'C:\\Users\\JH Z\\.dsh-doctor'
+  const pipe = doctorPipeName(root)
+  check('doctor pipe name matches dsh-doctor derivation', pipe === '\\\\.\\pipe\\dsh-doctor-47e816acfc345f52', pipe)
+
+  const cli = findDoctorCli()
+  check('doctor cli discovered', cli.length > 0 && cli.includes('dsh-doctor') && cli.endsWith('cli.mjs'), cli)
+
+  // Isolated heal: temporary doctor home, pipe surely unreachable -> must spawn.
+  const healHome = join(tmpdir(), `dsh-doctor-test-${Date.now()}`)
+  const prevHome = process.env.DSH_DOCTOR_HOME
+  process.env.DSH_DOCTOR_HOME = healHome
+  try {
+    const before = await pipeAvailable(doctorPipeName(healHome), 800)
+    check('isolated doctor pipe is unreachable before heal', before === false)
+    await ensureDoctorSupervisor()
+    // Give the spawned supervisor a moment to open its pipe.
+    await new Promise((r) => setTimeout(r, 2500))
+    const after = await pipeAvailable(doctorPipeName(healHome), 2000)
+    check('heal spawned a reachable supervisor', after === true)
+  } finally {
+    if (prevHome === undefined) delete process.env.DSH_DOCTOR_HOME
+    else process.env.DSH_DOCTOR_HOME = prevHome
+    // Cleanup: kill the test supervisor so it does not linger.
+    await import('node:child_process').then(({ execSync }) => {
+      try { execSync(`taskkill /F /FI "WINDOWTITLE eq dsh-doctor-test" 2>nul`, { stdio: 'ignore' }) } catch { /* none */ }
+    }).catch(() => {})
+  }
 }
 
 dispose()

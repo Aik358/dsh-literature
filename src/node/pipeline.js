@@ -282,7 +282,7 @@ export async function fetchItemPdf(key) {
   try {
     const result = await withRetry(
       (attempt) => {
-        if (attempt > 1) sse.emitTask({ id: task.id, state: 'running', progress: 10, message: `第 ${attempt} 次尝试` , updatedAt: Date.now()})
+        if (attempt > 1) sse.emitTask({ id: task.id, key, state: 'running', progress: 10, message: `第 ${attempt} 次尝试`, updatedAt: Date.now() })
         return fetchPdf(current.record, { timeoutMs: config.fetchTimeoutMs, unpaywallEmail: config.unpaywallEmail, customSources: config.customSources })
       },
       { ...config.retry, label: `fetch ${key}` },
@@ -357,7 +357,9 @@ export async function saveItem(key, { mode, tags } = {}) {
   await update(key, { state: 'saving', error: null })
 
   const config = await loadConfig()
-  const wantMode = mode || config.saveMode
+  // A bogus mode (tool arg, stale UI) must fall back to the configured target
+  // instead of silently taking the Zotero path.
+  const wantMode = ['builtin', 'dir', 'zotero'].includes(mode) ? mode : config.saveMode
 
   try {
     let result
@@ -399,16 +401,22 @@ export async function saveItem(key, { mode, tags } = {}) {
     }
     if (!pdfBuffer) {
       const fetched = await fetchItemPdf(key)
+      // A failed download must abort the save — silently creating a parent
+      // item with no attachment would leave a hollow record in the library.
       if (fetched?.pdf?.path) {
         const { readFile } = await import('node:fs/promises')
         pdfBuffer = await readFile(fetched.pdf.path).catch(() => null)
+      } else {
+        const err = fetched?.error ?? failure('fetch_failed', '无法获取全文 PDF，无法保存到文献库')
+        throw Object.assign(new Error(err.message), { code: err.code ?? 'fetch_failed', detail: err.detail })
       }
     }
 
     const clientId = `dshz_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+    const tagsList = Array.isArray(tags) ? tags.filter((x) => typeof x === 'string' && x.trim()) : []
     const zoteroItem = toZoteroItem(current.record, {
       clientId,
-      tags: tags?.length ? tags : config.preferredTags,
+      tags: tagsList.length ? tagsList : config.preferredTags,
     })
 
     const saved = await saveToZotero({

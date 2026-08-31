@@ -27,11 +27,18 @@ function SettingsPage({ close }) {
   const [saved, setSaved] = useState(false)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState('')
+  const [addingSource, setAddingSource] = useState(false)
+  const [draftLabel, setDraftLabel] = useState('')
+  const [draftTemplate, setDraftTemplate] = useState('')
+  const [draftHeaders, setDraftHeaders] = useState('')
 
   useEffect(() => {
     if (form == null && config.saveMode) setForm({ ...config })
   }, [config])
 
+  // All hooks are declared ABOVE this early return: when `form` is still null
+  // the component renders fewer hooks, and any hook declared after the return
+  // would flip the hook count between renders — React error #310.
   if (!form) return h('div', { className: 'zt-settings' }, h('div', { className: 'zt-empty' }, h(Spinner, { size: 18 })))
 
   const set = (patch) => setForm({ ...form, ...patch })
@@ -49,7 +56,10 @@ function SettingsPage({ close }) {
     setTesting(true)
     setTestResult('')
     try {
-      const { zotero } = await store.refresh()
+      // `refresh` updates the store rather than returning the payload; read the
+      // fresh status from the snapshot afterwards.
+      await store.refresh()
+      const zotero = store.getSnapshot().zotero
       setTestResult(zotero?.running ? t('settings.testOk') : t('settings.testFail'))
     } catch {
       setTestResult(t('settings.testFail'))
@@ -57,11 +67,6 @@ function SettingsPage({ close }) {
       setTesting(false)
     }
   }
-
-  const [addingSource, setAddingSource] = React.useState(false)
-  const [draftLabel, setDraftLabel] = React.useState('')
-  const [draftTemplate, setDraftTemplate] = React.useState('')
-  const [draftHeaders, setDraftHeaders] = React.useState('')
 
   const parseHeaders = (text) => {
     const out = {}

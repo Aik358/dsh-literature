@@ -37,7 +37,8 @@ dsh plugin --profile web add @a9i5k4/dsh-literature
 - **Full-text download** — OA multi-source chain (arXiv → OpenAlex OA → Unpaywall → DOI → publisher link), classified failures with retry; user-configured custom sources
 - **Citation generator** — Scribbr-style: reference list / in-text / direct quote (with page) × APA 7 / GB/T 7714 / MLA 9 / Chicago 17, one-click copy
 - **Library management** — scan an import folder (DOI/arXiv/title inferred from file names), batch-import from a Zotero-ecosystem library, optional folder watch, add/remove entries
-- **Side-panel reader** — built-in PDF viewer: zoom, pages, outline, full-text search, highlights and notes
+- **Side-panel reader** — built-in PDF viewer: zoom, pages, outline, full-text search, multi-colour highlights and notes
+- **AI assistant** — ChatPDF / SciSpace-style selection actions: **translate / explain / summarize** the selected passage, **ask questions about the full text**, or generate a **paper summary** — answers are steered into your current DeepSeek Harness chat, so you can keep asking follow-ups
 - **Search portals** — every item links to Google Scholar / Baidu Xueshu / CNKI / source page
 - **Conflict preview** — field-level diff against existing entries before saving
 - **Fully local** — loopback-only routes, no telemetry, no cloud relay, no account

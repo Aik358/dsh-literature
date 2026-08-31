@@ -5,7 +5,6 @@ import { registerRoutes } from './routes.js'
 import { registerTools } from './tools.js'
 import { registerSessionHook } from './session-hook.js'
 import { error, log } from './log.js'
-
 export const name = 'dsh-literature-pre'
 
 /**
@@ -48,6 +47,19 @@ export function apply(ctx, config) {
     } catch (e) {
       error('folder watcher unavailable:', e.message)
     }
+
+    // DSH Doctor supervisor self-heal: the host's own schtasks deployment
+    // fails when the user path contains spaces, which leaves the web UI
+    // spinning on /api/doctor/status forever. Spawn the supervisor under the
+    // host process so it lives exactly as long as the host does.
+    const doctorTimer = setTimeout(() => {
+      import('./doctor-selfheal.js')
+        .then(({ ensureDoctorSupervisor }) => ensureDoctorSupervisor())
+        .catch((e) => error('doctor supervisor heal unavailable:', e.message))
+    }, 5000)
+    doctorTimer.unref?.()
+    disposers.push(() => clearTimeout(doctorTimer))
+
     log('dsh-literature host half ready')
   })().catch((e) => error('dsh-literature startup failed:', e?.stack ?? e))
 

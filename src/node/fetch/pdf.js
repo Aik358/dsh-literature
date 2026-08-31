@@ -38,11 +38,6 @@ export function renderSourceTemplate(template, record) {
   for (const [k, v] of Object.entries(vars)) {
     if (!v && String(template).includes(`{${k}}`)) return ''
   }
-  // A template referencing a variable the record does not carry is unusable —
-  // silently blanking it would produce a broken URL.
-  for (const [k, v] of Object.entries(vars)) {
-    if (!v && String(template).includes(`{${k}}`)) return ''
-  }
   let out = String(template)
   for (const [k, v] of Object.entries(vars)) out = out.split(`{${k}}`).join(v)
   // A leftover placeholder or a non-absolute result is not usable.
@@ -194,7 +189,9 @@ export async function fetchPdf(record, { timeoutMs = 30000, unpaywallEmail = '',
         const html = buffer.toString('utf8', 0, Math.min(buffer.length, 2 * 1024 * 1024))
         const discovered = extractPdfUrlFromHtml(html, finalUrl || cand.url)
         if (discovered) {
-          pending.unshift({ url: discovered, source: `${cand.source} (PDF 链接)`, kind: 'pdf' })
+          // Inherit the candidate's headers: a PDF discovered on a custom
+          // mirror usually needs the same auth/session the landing page did.
+          pending.unshift({ url: discovered, source: `${cand.source} (PDF 链接)`, kind: 'pdf', headers: cand.headers })
           continue
         }
         failures.push({

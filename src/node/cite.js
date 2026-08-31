@@ -53,7 +53,9 @@ function apa(record) {
     const vol = record.volume ? `${record.volume}` : ''
     const issue = record.issue ? `(${record.issue})` : ''
     const pages = pagesStr(record) ? `, ${pagesStr(record)}` : ''
-    const volPart = vol ? `${vol}${issue}${pages}. ` : ''
+    // Volume, issue and pages can each be absent independently — never drop
+    // the ones that exist just because an earlier field is missing.
+    const volPart = vol || issue || pages ? `${vol}${issue}${pages}. ` : ''
     const url = doiUrl(record) ? `${doiUrl(record)}` : ''
     return `${who}${year}${title}. ${journal}${volPart}${url}`.trim()
   }

@@ -1,5 +1,6 @@
 const React = require('react')
 const h = React.createElement
+const ReactDOM = require('react-dom')
 const { t } = require('./i18n.cjs')
 const store = require('./store.cjs')
 
@@ -64,6 +65,10 @@ const Icon = {
   Panel: (props) => svg([h('rect', { x: 3, y: 3, width: 18, height: 18, rx: 2 }), h('path', { d: 'M9 3v18' })], props?.size),
   Quote: (props) =>
     svg([h('path', { d: 'M10 11H6a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2v6a4 4 0 01-4 4M21 11h-4a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2v6a4 4 0 01-4 4' })], props?.size),
+  Summarize: (props) =>
+    svg([h('path', { d: 'M4 6h16M4 10h16M4 14h10M4 18h7M15 17l2 2 4-4' })], props?.size),
+  Sparkle: (props) =>
+    svg([h('path', { d: 'M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 15l.9 2.6L22.5 18.5l-2.6.9L19 22l-.9-2.6-2.6-.9 2.6-.9z' })], props?.size),
 }
 
 function Spinner({ size = 16 }) {
@@ -150,33 +155,58 @@ function EmptyState({ onScan }) {
 
 /**
  * Lightweight dropdown menu: `trigger` is a render-prop (setOpen, open),
- * `items` is a list of { label, hint?, icon?, onClick?, divider? }.
+ * `items` is a list of { label, hint?, icon?, onClick?, divider?, disabled? }.
+ *
+ * The menu is PORTALLED to the panel root and positioned relative to the
+ * panel: anchoring it inside the trigger (a list card) would let the list's
+ * overflow clip it and let sibling cards paint over it — the "menu hidden
+ * behind the plugin body" bug.
  */
 function Dropdown({ trigger, items, align = 'left' }) {
   const [open, setOpen] = React.useState(false)
+  const [pos, setPos] = React.useState(null)
   const ref = React.useRef(null)
+
   React.useEffect(() => {
     if (!open) return
+    const update = () => {
+      const triggerEl = ref.current
+      if (!triggerEl) return
+      const panelEl = triggerEl.closest('.zt-panel')
+      const pr = panelEl?.getBoundingClientRect() ?? { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight }
+      const r = triggerEl.getBoundingClientRect()
+      const menuW = Math.min(280, Math.max(200, pr.right - pr.left - 16))
+      // Flip upward only when there is genuinely no room below inside the panel.
+      const below = pr.bottom - r.bottom
+      const above = r.top - pr.top
+      const up = below < 200 && above > below
+      const left = Math.max(8, Math.min(align === 'right' ? r.right - menuW : r.left, pr.right - menuW - 8) - pr.left)
+      const top = up ? Math.max(8, r.top - pr.top - 4 - 240) : r.bottom - pr.top + 4
+      setPos({ left, top, menuW })
+    }
+    update()
+    window.addEventListener('resize', update)
     const onDoc = (e) => {
-      if (!ref.current?.contains(e.target)) setOpen(false)
+      const insideMenu = typeof e.target?.closest === 'function' && !!e.target.closest('.zt-menu')
+      if (!ref.current?.contains(e.target) && !insideMenu) setOpen(false)
     }
     const onEsc = (e) => e.key === 'Escape' && setOpen(false)
     document.addEventListener('mousedown', onDoc)
     document.addEventListener('keydown', onEsc)
     return () => {
+      window.removeEventListener('resize', update)
       document.removeEventListener('mousedown', onDoc)
       document.removeEventListener('keydown', onEsc)
     }
-  }, [open])
+  }, [open, align])
 
-  return h(
-    'span',
-    { ref, style: { position: 'relative', display: 'inline-flex' } },
-    trigger(setOpen, open),
-    open
-      ? h(
-          'div',
-          { className: 'zt-menu', 'data-align': align },
+  const menuEl = open
+    ? ReactDOM.createPortal(
+        h('div', {
+          className: 'zt-menu',
+          'data-align': align,
+          style: pos ? { left: pos.left, top: pos.top, position: 'absolute', width: pos.menuW, minWidth: 'auto' } : null,
+        },
           ...items.map((it, i) =>
             it.divider
               ? h('div', { key: i, className: 'zt-menu-divider' })
@@ -186,7 +216,10 @@ function Dropdown({ trigger, items, align = 'left' }) {
                     key: i,
                     className: 'zt-menu-item',
                     type: 'button',
+                    disabled: it.disabled === true,
+                    title: it.disabled && it.disabledHint ? it.disabledHint : undefined,
                     onClick: () => {
+                      if (it.disabled === true) return
                       setOpen(false)
                       it.onClick?.()
                     },
@@ -196,8 +229,16 @@ function Dropdown({ trigger, items, align = 'left' }) {
                   it.hint ? h('span', { className: 'zt-menu-hint' }, it.hint) : null,
                 ),
           ),
-        )
-      : null,
+        ),
+        ref.current?.closest('.zt-panel') ?? document.body,
+      )
+    : null
+
+  return h(
+    'span',
+    { ref, style: { position: 'relative', display: 'inline-flex' } },
+    trigger(setOpen, open),
+    menuEl,
   )
 }
 

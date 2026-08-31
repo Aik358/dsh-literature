@@ -40,13 +40,14 @@ function ConflictDiff({ item, conflict }) {
   const proceed = async (mode) => {
     setBusy(true)
     try {
-      if (mode === 'replace') {
-        // The user explicitly wants the new record; saving again would create a
-        // duplicate, so this is intentionally the same call with a flag the
-        // host treats as "save anyway".
-        await store.saveItem(item.key, {})
+      // The Connector API only creates items — it cannot update or delete, so
+      // "overwrite" and "merge" cannot be executed faithfully. Triggering a
+      // save here would create a DUPLICATE instead of replacing anything, so
+      // we never re-save; we tell the user the honest outcome instead.
+      if (mode === 'replace' || mode === 'merge') {
+        store.flash(t('diff.notSupported'))
       }
-      // 'keep' and 'merge' both mean: do not touch the library entry.
+      // 'keep' (and the two unsupported modes) leave the library untouched.
       store.setView('list')
     } finally {
       setBusy(false)

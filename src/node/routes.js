@@ -6,6 +6,7 @@ import { loadConfig, saveConfig, PDF_DIR } from './config.js'
 import * as store from './store/db.js'
 import * as pipeline from './pipeline.js'
 import * as sse from './sse.js'
+import { noteSession } from './session-track.js'
 import { describe, ping } from './zotero/health.js'
 import { listCollections, searchItems, getFileBuffer } from './zotero/local-api.js'
 import { getSelectedCollection } from './zotero/connector.js'
@@ -98,7 +99,7 @@ async function servePdf(req, res, key) {
       'content-range': `bytes ${range.start}-${range.end}/${buffer.length}`,
       'accept-ranges': 'bytes',
     })
-    res.end(range ? slice : buffer)
+    res.end(req.method === 'HEAD' ? undefined : slice)
     return
   }
 
@@ -108,43 +109,71 @@ async function servePdf(req, res, key) {
     'accept-ranges': 'bytes',
     'cache-control': 'private, max-age=300',
   })
-  res.end(buffer)
+  res.end(req.method === 'HEAD' ? undefined : buffer)
 }
 
 /** PDF bytes for a library item, proxied from Zotero's own read-only file endpoint. */
-async function serveZoteroPdf(res, key) {
+async function serveZoteroPdf(req, res, key) {
   try {
     const { buffer } = await getFileBuffer(key)
+    // pdf.js issues Range requests by default; honour them like the local
+    // servePdf path does, and answer HEAD without shipping the body.
+    const range = parseRange(req.headers.range, buffer.length)
+    if (range?.invalid) {
+      res.writeHead(416, { 'content-range': `bytes */${buffer.length}`, 'content-length': 0 })
+      res.end()
+      return
+    }
+    if (range) {
+      const slice = buffer.subarray(range.start, range.end + 1)
+      res.writeHead(206, {
+        'content-type': 'application/pdf',
+        'content-length': slice.length,
+        'content-range': `bytes ${range.start}-${range.end}/${buffer.length}`,
+        'accept-ranges': 'bytes',
+      })
+      res.end(req.method === 'HEAD' ? undefined : slice)
+      return
+    }
     res.writeHead(200, {
       'content-type': 'application/pdf',
       'content-length': buffer.length,
       'accept-ranges': 'bytes',
     })
-    res.end(buffer)
+    res.end(req.method === 'HEAD' ? undefined : buffer)
   } catch (e) {
     writeJson(res, 502, { error: e.message })
   }
 }
 
 async function handleAnnotations(req, res, key) {
+  // The key travels URL-encoded (spaces -> %20). Decode once so annotations
+  // are stored under the SAME key as the item itself — otherwise discarding
+  // an item (which deletes by the raw key) would leak orphaned annotations.
+  let decoded = key
+  try {
+    decoded = decodeURIComponent(key)
+  } catch {
+    /* keep as-is */
+  }
   if (req.method === 'GET') {
-    writeJson(res, 200, { annotations: await store.getAnnotations(key) })
+    writeJson(res, 200, { annotations: await store.getAnnotations(decoded) })
     return
   }
   const body = await readJsonBody(req)
   if (req.method === 'POST') {
-    const created = await store.addAnnotation(key, body ?? {})
+    const created = await store.addAnnotation(decoded, body ?? {})
     writeJson(res, 201, { annotation: created })
     return
   }
   if (req.method === 'PATCH') {
-    const updated = await store.patchAnnotation(key, body?.id, body?.patch ?? {})
+    const updated = await store.patchAnnotation(decoded, body?.id, body?.patch ?? {})
     writeJson(res, 200, { annotation: updated })
     return
   }
   if (req.method === 'DELETE') {
     const id = new URL(req.url ?? '/', 'http://127.0.0.1').searchParams.get('id')
-    await store.removeAnnotation(key, id)
+    await store.removeAnnotation(decoded, id)
     writeJson(res, 200, { ok: true })
     return
   }
@@ -156,7 +185,7 @@ async function readJsonBody(req) {
   return read(req)
 }
 
-export async function handler(req, res) {
+export async function handler(req, res, ctx) {
   if (!isLoopbackRequest(req)) {
     writeJson(res, 403, { error: 'forbidden: loopback-only' })
     return
@@ -263,14 +292,16 @@ export async function handler(req, res) {
       const body = await readJsonBody(req)
       const { importDir } = await import('./importer.js')
       const config = await loadConfig()
-      const result = await importDir(body?.dir || config.importDir, { autoResolve: body?.autoResolve !== false })
+      const dir = typeof body?.dir === 'string' && body.dir.trim() ? body.dir.trim() : config.importDir
+      const result = await importDir(dir, { autoResolve: body?.autoResolve !== false })
       writeJson(res, 200, result)
       return
     }
 
     if (head === 'search' && methodOk(req, 'POST')) {
       const body = await readJsonBody(req)
-      const candidates = await pipeline.searchCandidates(String(body?.q ?? ''), Number(body?.rows ?? 8))
+      const rows = Number(body?.rows)
+      const candidates = await pipeline.searchCandidates(String(body?.q ?? ''), Number.isFinite(rows) ? rows : 8)
       writeJson(res, 200, { candidates })
       return
     }
@@ -295,7 +326,8 @@ export async function handler(req, res) {
     if (head === 'import-zotero' && methodOk(req, 'POST')) {
       const body = await readJsonBody(req)
       const { importFromZotero } = await import('./importer.js')
-      const result = await importFromZotero({ limit: Number(body?.limit ?? 50) })
+      const limit = Number(body?.limit)
+      const result = await importFromZotero({ limit: Number.isFinite(limit) && limit > 0 ? Math.min(limit, 500) : 50 })
       writeJson(res, 200, result)
       return
     }
@@ -337,8 +369,8 @@ export async function handler(req, res) {
         writeJson(res, 200, { items })
         return
       }
-      if (sub === 'file' && parts[2] && methodOk(req, 'GET')) {
-        await serveZoteroPdf(res, parts[2])
+      if (sub === 'file' && parts[2] && methodOk(req, 'GET', 'HEAD')) {
+        await serveZoteroPdf(req, res, parts[2])
         return
       }
       if (sub === 'ping' && methodOk(req, 'GET')) {
@@ -352,6 +384,28 @@ export async function handler(req, res) {
       return
     }
 
+    if (head === 'ai') {
+      const sub = parts[1] ?? ''
+      if (sub === 'ask' && methodOk(req, 'POST')) {
+        const body = await readJsonBody(req)
+        const { askAi } = await import('./ai.js')
+        const result = await askAi(ctx, {
+          key: String(body?.key ?? ''),
+          action: String(body?.action ?? 'ask'),
+          question: String(body?.question ?? ''),
+          selection: String(body?.selection ?? ''),
+          sessionId: body?.sessionId ? String(body.sessionId) : null,
+        })
+        writeJson(res, 200, result)
+        return
+      }
+      if (sub === 'session' && methodOk(req, 'GET')) {
+        const { recentSession } = await import('./ai.js')
+        writeJson(res, 200, { sessionId: recentSession() })
+        return
+      }
+    }
+
     writeJson(res, 404, { error: `unknown route: ${path}` })
   } catch (e) {
     warn(`route ${path} failed:`, e?.stack ?? e)
@@ -361,7 +415,19 @@ export async function handler(req, res) {
 }
 
 export function registerRoutes(ctx) {
-  const disposers = [ctx.webServer.register({ kind: 'prefix', path: PREFIX, handler })]
+  const disposers = [ctx.webServer.register({ kind: 'prefix', path: PREFIX, handler: (req, res) => handler(req, res, ctx) })]
+  // Keep the AI-assist fallback session fresh: whichever session saw the most
+  // recent activity is the one reader actions land in when the browser does
+  // not supply an explicit id. Uses the zero-dependency session-track module —
+  // a heavyweight import chain here (e.g. loading pdf.js) would block the
+  // host's event loop on every chat event.
+  if (typeof ctx.on === 'function') {
+    disposers.push(
+      ctx.on('session/event', (session) => {
+        noteSession(session)
+      }),
+    )
+  }
   log(`routes mounted at ${PREFIX}/`)
   return disposers
 }

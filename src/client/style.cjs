@@ -32,15 +32,21 @@ const CSS = `
   font-family: inherit;
   line-height: 1.6;
   overflow: hidden;
-  z-index: 40;
+  /* Floating window must sit above the host's main UI. The reference plugin
+     (dsh-auto-memory) uses 3000 for its overlay panel — 40 was far too low
+     and the host's own layers painted over us. */
+  z-index: 3000;
 }
 
 .zt-panel[hidden] { display: none; }
 
 /* When embedded as a tab inside dsh-better-sidebar's right panel, the panel
-   stops being a floating window and fills its host container. */
+   stops being a floating window and fills its host container. It must stay a
+   positioning context (relative) so absolutely-positioned children — toasts,
+   menus, AI floating bars — anchor to the panel instead of flying off to the
+   host's nearest positioned ancestor (where they would be invisible). */
 .zt-panel.zt-panel-embedded {
-  position: static;
+  position: relative;
   inset: auto;
   width: 100% !important;
   min-width: 0;
@@ -200,6 +206,7 @@ const CSS = `
 
 .zt-skeleton { height: 76px; border-radius: 8px; background: var(--dsw-alias-bg-skeleton, rgba(128,128,128,.14)); animation: zt-pulse 1.4s var(--ds-ease-in-out, ease-in-out) infinite; }
 @keyframes zt-pulse { 0%,100% { opacity: 1; } 50% { opacity: .5; } }
+@keyframes zt-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
 .zt-banner {
   display: flex; align-items: center; gap: 8px;
@@ -208,8 +215,12 @@ const CSS = `
   background: var(--dsw-alias-state-warn-secondary, rgba(176,96,0,.08));
   color: var(--dsw-alias-state-warn-label, #8a4b00);
 }
+.zt-banner-row { justify-content: space-between; }
+.zt-banner-btn { flex: 0 0 auto; height: 24px; padding: 0 10px; font-size: 12px; }
 
-.zt-toolbar { display: flex; align-items: center; gap: 8px; padding: 8px; border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.18)); flex: 0 0 auto; }
+.zt-toolbar { display: flex; align-items: center; gap: 8px; padding: 8px; border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.18)); flex: 0 0 auto; overflow-x: auto; }
+.zt-toolbar .zt-iconbtn { flex: 0 0 auto; }
+.zt-toolbar .zt-input { flex: 0 1 220px; }
 .zt-input {
   flex: 1; min-width: 0; height: 28px; padding: 0 8px;
   border: 1px solid var(--dsw-alias-border-l2, rgba(128,128,128,.24));
@@ -220,7 +231,7 @@ const CSS = `
 
 /* ---- reader ---- */
 .zt-reader { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; background: var(--dsw-alias-bg-base, #fff); }
-.zt-reader-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 8px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.zt-reader-scroll { position: relative; flex: 1 1 auto; min-height: 0; overflow: auto; padding: 8px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .zt-page { position: relative; background: #fff; box-shadow: var(--dsw-shadow-lv1, 0 2px 4px 0 rgba(0,0,0,.05)); line-height: 0; }
 .zt-page > canvas { display: block; width: 100%; height: auto; }
 
@@ -252,6 +263,60 @@ const CSS = `
 .zt-highlight[data-color='green']  { background: rgba(34, 197, 94, .32); }
 .zt-highlight[data-color='blue']   { background: rgba(59, 130, 246, .30); }
 .zt-highlight[data-color='pink']   { background: rgba(244, 114, 182, .34); }
+
+/* ---- AI assist floating bars & ask box ----
+   Anchored to the reader's scroll container (position: relative), not the
+   viewport: position:fixed breaks inside dsh-better-sidebar because host
+   containers may create transforms/containing blocks. */
+.zt-ai-float {
+  position: absolute;
+  z-index: 3030;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  background: var(--dsw-alias-bg-overlay, #fff);
+  border: 1px solid var(--dsw-alias-border-l2, rgba(128,128,128,.24));
+  border-radius: 10px;
+  box-shadow: var(--dsw-shadow-lv2, 0 4px 12px 0 rgba(0,0,0,.12));
+  font-size: 12px;
+}
+.zt-ai-float-btn {
+  height: 24px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary, #1f1f1f);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.zt-ai-float-btn:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); }
+.zt-ai-float-btn-accent {
+  background: var(--dsw-alias-button-primary-fill, #4d6bfe);
+  color: var(--dsw-alias-label-primary-inverted, #fff);
+}
+.zt-ai-float-btn-accent:hover { background: var(--dsw-alias-button-primary-hover, #3d58e0); }
+.zt-ai-float-btn-danger { color: var(--dsw-alias-state-error-primary, #d93025); }
+.zt-hl-float-text {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-secondary, #666);
+  padding: 0 6px;
+}
+.zt-ai-ask {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.18));
+  background: var(--dsw-alias-bg-layer-1, #fafafa);
+}
+.zt-ai-ask .zt-input { flex: 1; }
 
 .zt-toc { max-height: 40%; overflow: auto; border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.18)); padding: 8px; }
 .zt-toc button {
@@ -324,12 +389,16 @@ const CSS = `
   top: calc(100% + 4px);
   min-width: 200px;
   max-width: 280px;
+  /* The panel clips its children (overflow hidden); a long menu must scroll
+     inside its own box instead of being cut off at the panel edge. */
+  max-height: min(60vh, 360px);
+  overflow-y: auto;
   padding: 4px;
   background: var(--dsw-alias-bg-layer-2, #fff);
   border: 1px solid var(--dsw-alias-border-l2, rgba(128,128,128,.24));
   border-radius: 10px;
   box-shadow: var(--dsw-shadow-lv2, 0 4px 12px 0 rgba(0,0,0,.08));
-  z-index: 60;
+  z-index: 3010;
   display: flex;
   flex-direction: column;
 }
@@ -352,6 +421,8 @@ const CSS = `
 }
 .zt-menu-item:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); }
 .zt-menu-item:active { background: var(--dsw-alias-interactive-bg-active, rgba(128,128,128,.2)); }
+.zt-menu-item[disabled] { opacity: .45; cursor: default; }
+.zt-menu-item[disabled]:hover { background: transparent; }
 .zt-menu-icon { display: inline-flex; color: var(--dsw-alias-label-secondary, #666); }
 .zt-menu-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .zt-menu-hint { font-size: 12px; color: var(--dsw-alias-label-tertiary, #8a8a8a); }
@@ -365,11 +436,13 @@ const CSS = `
   transform: translateX(-50%);
   padding: 8px 14px;
   border-radius: 8px;
-  background: var(--dsw-alias-bg-layer-3, #1f1f1f);
-  color: var(--dsw-alias-label-primary-inverted, #fff);
+  /* Fixed high-contrast colours: the host's own alias values can collapse to
+     the same hue on some themes, which rendered the toast text invisible. */
+  background: #1f1f1f;
+  color: #ffffff;
   font-size: 13px;
-  box-shadow: var(--dsw-shadow-lv2, 0 4px 12px 0 rgba(0,0,0,.12));
-  z-index: 70;
+  box-shadow: 0 4px 12px 0 rgba(0,0,0,.18);
+  z-index: 3020;
   pointer-events: none;
   animation: zt-toast-in .2s var(--ds-ease-in-out, cubic-bezier(.4,0,.2,1));
 }

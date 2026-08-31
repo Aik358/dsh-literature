@@ -206,8 +206,9 @@ export async function importFromZotero({ limit = 50 } = {}) {
     let pdf = null
     try {
       const children = await getItemChildren(it.key)
+      // Zotero attachment items carry their mime type in `contentType`.
       const attach = (children ?? []).find(
-        (c) => c.itemType === 'attachment' && /pdf/i.test(c.contentType ?? c.contentType ?? ''),
+        (c) => c.itemType === 'attachment' && /pdf/i.test(c.contentType ?? ''),
       )
       if (attach?.key) {
         const { buffer } = await getFileBuffer(attach.key).catch(() => ({ buffer: null }))

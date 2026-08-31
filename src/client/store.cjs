@@ -146,6 +146,24 @@ async function citeItem(key, opts) {
   return api.cite(key, opts)
 }
 
+/**
+ * Steers an AI-assist action into the current DSH conversation. `sessionId`
+ * is read from the browser runtime when available so the message lands in the
+ * chat the user is actually looking at.
+ */
+async function askAi(key, opts = {}) {
+  const payload = { key, ...opts }
+  const sid = currentSessionReader?.() ?? null
+  if (sid) payload.sessionId = sid
+  return api.aiAsk(payload)
+}
+
+/** Installed by the client entry with `ctx.sessions.list.getSnapshot().current`. */
+let currentSessionReader = null
+function setSessionReader(fn) {
+  currentSessionReader = typeof fn === 'function' ? fn : null
+}
+
 async function searchCandidates(q) {
   const { candidates } = await api.searchCandidates(q, 8)
   set({ searchResults: candidates ?? [], searchQuery: q, searchLoading: false })
@@ -267,6 +285,16 @@ async function saveConfig(patch) {
 /** Applies SSE pushes so progress updates without polling. */
 function attachEvents() {
   return subscribeEvents((type, data) => {
+    if (type === 'poll') {
+      // Degraded mode (SSE unavailable): the server snapshot replaces the
+      // local copy wholesale — identical to what refresh() does.
+      set({
+        items: data.items ?? state.items,
+        tasks: data.tasks ?? state.tasks,
+        zotero: { ...state.zotero, ...(data.zotero ?? {}) },
+      })
+      return
+    }
     if (type === 'item') {
       const items = state.items.slice()
       const idx = items.findIndex((i) => i.key === data.key)
@@ -293,6 +321,34 @@ function attachEvents() {
       set({ zotero: { ...state.zotero, ...data } })
     }
   })
+}
+
+// The SSE stream is ref-counted: connect when the panel becomes visible,
+// release when it closes, so the connection pool stays available for PDF
+// fetches. EventSource auto-reconnects on its own once connected.
+let eventsDisposer = null
+let eventsRefs = 0
+
+function ensureEvents() {
+  eventsRefs += 1
+  if (eventsDisposer) return
+  try {
+    eventsDisposer = attachEvents()
+  } catch (e) {
+    eventsRefs = Math.max(0, eventsRefs - 1)
+    console.warn('[dsh-literature] SSE attach failed:', e?.message)
+  }
+}
+
+function releaseEvents() {
+  eventsRefs = Math.max(0, eventsRefs - 1)
+  if (eventsRefs > 0 || !eventsDisposer) return
+  try {
+    eventsDisposer()
+  } catch {
+    /* already closed */
+  }
+  eventsDisposer = null
 }
 
 const store = {
@@ -323,7 +379,11 @@ const store = {
   setView,
   saveConfig,
   attachEvents,
+  ensureEvents,
+  releaseEvents,
   isBusy,
+  askAi,
+  setSessionReader,
 }
 
 module.exports = store

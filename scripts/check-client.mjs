@@ -23,6 +23,11 @@ const reactStub = new Proxy(
     },
   },
 )
+// react-dom is host-provided; the bundle only calls createPortal / createRoot.
+const reactDomStub = {
+  createPortal: (node) => node,
+  createRoot: () => ({ render() {}, unmount() {} }),
+}
 
 const context = vm.createContext({
   console,
@@ -63,6 +68,7 @@ if (typeof entry.factory !== 'function') throw new Error('factory is not a funct
 const module = { exports: {} }
 const ret = entry.factory((id) => {
   if (id === 'react') return reactStub
+  if (id === 'react-dom') return reactDomStub
   throw new Error(`unexpected runtime require: ${id}`)
 })
 

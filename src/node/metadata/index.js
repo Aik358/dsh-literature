@@ -65,10 +65,10 @@ export async function resolveIdentifier(id, { timeoutMs = 20000, unpaywallEmail 
   }
 
   if (id.kind === 'isbn') {
-    return (
-      (await firstResult(() => openalex.searchByTitle(id.value, { mailto, timeoutMs, rows: 1 }), 'openalex/isbn'))?.[0] ??
-      null
-    )
+    // Open Library is the dependable keyless source for ISBN lookup (OpenAlex
+    // has no isbn filter; Google Books rate-limits anonymous requests).
+    const { fetchByIsbn } = await import('./isbn.js')
+    return firstResult(() => fetchByIsbn(id.value, { timeoutMs }), 'openlibrary/isbn')
   }
 
   if (id.kind === 'title') {

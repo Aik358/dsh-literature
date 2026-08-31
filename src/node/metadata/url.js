@@ -60,7 +60,7 @@ export async function resolveUrlPage(url, { timeoutMs = 15000 } = {}) {
   const doi = firstMatch(html, DOI_PATTERNS)
   const author = firstMatch(html, AUTHOR_PATTERNS)
   const year = firstMatch(html, DATE_PATTERNS)
-  const cleanedTitle = title.replace(/[|–-].*$/, '').trim() // drop site suffixes
+  const cleanedTitle = stripSiteSuffix(title)
 
   return {
     title: cleanedTitle || '',
@@ -70,4 +70,21 @@ export async function resolveUrlPage(url, { timeoutMs = 15000 } = {}) {
     url,
     error,
   }
+}
+
+/**
+ * Removes publisher-page suffixes ("Title | Wiley", "Title – PMC") while
+ * keeping hyphenated paper titles intact. Exported for tests.
+ */
+export function stripSiteSuffix(title) {
+  if (!title) return ''
+  return String(title)
+    // "Title | Wiley" / "Title – PMC" / "Title — Springer": separator must be
+    // space-delimited and the remainder a short capitalised fragment. Lower
+    // case prose after a hyphen ("Attention-deficit…") never matches, so
+    // hyphenated English titles survive.
+    .replace(/\s+[|–—-]\s+[A-Z][A-Za-z0-9&.()\- ]{0,60}$/, '')
+    // Trailing bare separator ("Title |", "Title –") with nothing after it.
+    .replace(/\s+[|–—-]\s*$/, '')
+    .trim()
 }

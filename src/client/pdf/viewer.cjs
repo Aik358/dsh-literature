@@ -9,8 +9,19 @@ const React = require('react')
 let pdfjs = null
 let workerReady = false
 
+/** `Promise.try` is ES2025 — absent on older Chromium kernels (the DSH host
+ *  may embed one). pdf.js 6.x calls it in its message loop, so polyfill it on
+ *  the main thread too (the worker bundle gets its own copy at build time). */
+function ensurePromiseTry() {
+  if (typeof Promise.try === 'function') return
+  Promise.try = function promiseTry(fn) {
+    return new Promise((resolve) => resolve(fn()))
+  }
+}
+
 function loadPdfjs() {
   if (pdfjs) return pdfjs
+  ensurePromiseTry()
   // eslint-disable-next-line global-require
   pdfjs = require('pdfjs-dist')
   if (!workerReady && typeof __PDFJS_WORKER_SRC__ === 'string' && __PDFJS_WORKER_SRC__ && typeof Worker !== 'undefined') {
@@ -73,9 +84,31 @@ async function createViewer(root, options) {
     return () => controller.listeners[event].delete(fn)
   }
 
-  const loadingTask = lib.getDocument({ url: options.pdfUrl, withCredentials: false, isEvalSupported: false })
-  controller.loadingTask = loadingTask
-  controller.doc = await loadingTask.promise
+  // Load with a hard timeout and ONE silent retry: a transient stall (e.g. the
+  // browser connection pool momentarily saturated by SSE streams) must not
+  // leave the panel stuck on "正在加载 PDF…" — the user should never have to
+  // reload the page to read a paper.
+  let lastError = null
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const task = lib.getDocument({ url: options.pdfUrl, withCredentials: false, isEvalSupported: false })
+    controller.loadingTask = task
+    const timer = setTimeout(() => {
+      // Abort a wedged load; the rejected promise triggers the retry below.
+      task.destroy().catch(() => {})
+    }, 30000)
+    try {
+      controller.doc = await task.promise
+      break
+    } catch (e) {
+      lastError = e
+      clearTimeout(timer)
+      if (controller.destroyed || attempt === 2) {
+        throw new Error(lastError?.message?.includes('加载超时') ? 'PDF 加载超时，请重试' : 'PDF 加载失败，请重试')
+      }
+      // Brief backoff before the retry so the first attempt's sockets drain.
+      await new Promise((r) => setTimeout(r, 400))
+    }
+  }
   if (controller.destroyed) return controller
 
   const total = controller.doc.numPages
@@ -175,11 +208,8 @@ async function createViewer(root, options) {
   const applyScale = (mode, explicit) => {
     controller.mode = mode ?? controller.mode
     if (explicit) controller.scale = explicit
-    const first = root.querySelector('.zt-page')
     const containerWidth = root.clientWidth - 24
     if (controller.mode === 'fit-width') {
-      const baseWidth = controller.doc.getPage(1).then ? null : null
-      void baseWidth
       // Derive from the first page's intrinsic size.
       controller.doc
         .getPage(1)
@@ -203,7 +233,6 @@ async function createViewer(root, options) {
         .catch(() => {})
       return
     }
-    void first
     relayout()
   }
 
@@ -325,6 +354,10 @@ async function createViewer(root, options) {
         el.style.width = `${r.width * 100}%`
         el.style.height = `${r.height * 100}%`
         el.title = a.note ?? a.text ?? ''
+        el.addEventListener('click', (ev) => {
+          ev.stopPropagation()
+          emit('highlight-click', { annotation: a, x: ev.clientX, y: ev.clientY })
+        })
         pageEl.appendChild(el)
       }
     }
@@ -333,6 +366,26 @@ async function createViewer(root, options) {
   controller.setAnnotations = (list) => {
     controller.annotations = list ?? []
     for (const [n, el] of controller.pageEls) drawAnnotations(n, el)
+  }
+
+  /** Adds a highlight from the selection toolbar and persists it via the host. */
+  controller.addHighlight = (annotation) => {
+    const next = {
+      id: annotation.id ?? `an_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      createdAt: annotation.createdAt ?? Date.now(),
+      ...annotation,
+    }
+    controller.annotations.push(next)
+    drawAnnotations(next.pageIndex + 1, controller.pageEls.get(next.pageIndex + 1))
+    emit('annotation', next)
+    return next
+  }
+
+  /** Removes a highlight everywhere and notifies the panel (which deletes it server-side). */
+  controller.removeHighlight = (id) => {
+    controller.annotations = controller.annotations.filter((a) => a.id !== id)
+    for (const [n, el] of controller.pageEls) drawAnnotations(n, el)
+    emit('annotations-changed', controller.annotations)
   }
 
   const onMouseUp = (event) => {
@@ -344,19 +397,18 @@ async function createViewer(root, options) {
     const rects = normalizedRectsFromSelection(range, pageEl)
     const text = sel.toString().trim()
     if (!text || !rects.length) return
-    const annotation = {
-      id: `an_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    // Surface the selection so the panel can show a floating action bar
+    // (translate / explain / summarize / highlight) — highlight is no longer
+    // created implicitly on every selection. Coordinates are viewport-relative
+    // so the floating bar can position itself with `position: fixed`.
+    const selRect = range.getBoundingClientRect()
+    emit('selection', {
+      text,
       pageIndex: Number(pageEl.dataset.page) - 1,
       rects,
-      text,
-      color: COLORS[controller.annotations.length % COLORS.length],
-      note: '',
-      createdAt: Date.now(),
-    }
-    controller.annotations.push(annotation)
-    drawAnnotations(annotation.pageIndex + 1, pageEl)
-    sel.removeAllRanges()
-    emit('annotation', annotation)
+      x: selRect.left + selRect.width / 2,
+      y: selRect.top,
+    })
   }
   root.addEventListener('mouseup', onMouseUp)
 

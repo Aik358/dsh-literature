@@ -42,7 +42,15 @@ const nodeOptions = {
  * pdf.js needs its worker as a separate script. The DSH module loader only ever
  * serves `/plugins/<id>/client.js`, so the worker bundle is inlined as a string
  * and rehydrated through a Blob URL at runtime.
+ *
+ * pdf.js 6.x calls `Promise.try` inside the worker's message loop; that API is
+ * ES2025 and is MISSING on older Chromium kernels (the DSH host may embed one),
+ * which makes the worker crash and the PDF load hang forever. The polyfill is
+ * prepended to the worker bundle so any kernel can run it.
  */
+const PROMISE_TRY_POLYFILL =
+  'if(typeof Promise.try!=="function"){Promise.try=function(f){return new Promise(function(r){r(f())})}};\n'
+
 async function bundleWorkerSource() {
   let workerEntry
   try {
@@ -65,7 +73,7 @@ async function bundleWorkerSource() {
     legalComments: 'none',
     logLevel: 'silent',
   })
-  const text = result.outputFiles[0].text
+  const text = PROMISE_TRY_POLYFILL + result.outputFiles[0].text
   console.log(`[dsh-literature] pdf.js worker bundled: ${(text.length / 1024).toFixed(0)} KB`)
   return text
 }

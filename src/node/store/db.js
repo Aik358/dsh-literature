@@ -41,11 +41,13 @@ export async function flush() {
     clearTimeout(flushTimer)
     flushTimer = null
   }
-  await persist()
+  // Wait for an in-flight scheduled persist first, then write the newest
+  // snapshot — never run two writes to the same file concurrently.
   if (flushing) {
     await flushing
     flushing = null
   }
+  await persist()
 }
 
 export async function getState() {

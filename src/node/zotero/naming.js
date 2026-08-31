@@ -50,7 +50,6 @@ export function renderName(record, template = '{author}_{year}_{title}', { maxLe
   }
   // A template may reference nothing at all; fall back rather than emit an empty name.
   if (!out.trim()) out = '{author}_{year}_{title}'
-  if (!out.trim()) out = 'Untitled'
 
   return clampPart(out, maxLength)
 }

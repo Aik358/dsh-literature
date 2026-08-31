@@ -115,6 +115,15 @@ function apply(ctx) {
 
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-literature: dictionaries')
 
+  // Reader AI-assist lands in whatever chat the user is looking at; the
+  // sessions service exposes the current session id through its list snapshot.
+  try {
+    const sessions = ctx.sessions?.list
+    if (sessions) store.setSessionReader(() => sessions.getSnapshot()?.current ?? null)
+  } catch (e) {
+    console.debug('[dsh-literature] sessions service unavailable:', e?.message)
+  }
+
   // Resolve the slots service FIRST — every registration below reads it, and
   // an effect body runs immediately, so referencing `slots` before its `const`
   // initializes would throw a TDZ ReferenceError at load time.
@@ -214,9 +223,10 @@ function apply(ctx) {
     }
   }
 
-  // SSE progress stream; disposed together with the fiber.
-  const disposeEvents = store.attachEvents()
-  ctx.effect(() => disposeEvents, 'dsh-literature: sse')
+  // SSE progress stream: connected while the panel is mounted (Panel's own
+  // effect), released on close — see store.ensureEvents/releaseEvents. This
+  // keeps the browser's ~6 same-origin connections available for PDF fetches.
+  store.ensureEvents()
 
   store.refresh().catch((e) => console.warn('[dsh-literature] initial state load failed', e?.message))
   console.log('[dsh-literature] client ready')
