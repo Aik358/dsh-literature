@@ -223,10 +223,12 @@ function apply(ctx) {
     }
   }
 
-  // SSE progress stream: connected while the panel is mounted (Panel's own
-  // effect), released on close — see store.ensureEvents/releaseEvents. This
-  // keeps the browser's ~6 same-origin connections available for PDF fetches.
-  store.ensureEvents()
+  // NOTE: the SSE progress stream is deliberately NOT connected here. It is
+  // ref-counted by the Panel component (connected while the panel is visible,
+  // released when it closes / the tab is hidden). An unconditional
+  // ensureEvents() at apply time leaked one same-origin connection for the
+  // whole session — with the browser's ~6-connection cap that queued every
+  // PDF fetch behind it.
 
   store.refresh().catch((e) => console.warn('[dsh-literature] initial state load failed', e?.message))
   console.log('[dsh-literature] client ready')

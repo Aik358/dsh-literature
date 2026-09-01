@@ -137,7 +137,7 @@ function EmptyState({ onScan }) {
     h('p', null, t('empty.body')),
     h(
       'div',
-      { style: { marginTop: 16, display: 'flex', gap: 8 } },
+      { style: { marginTop: 16, display: 'flex', gap: 8, flexWrap: 'wrap' } },
       h('input', {
         className: 'zt-input',
         placeholder: t('empty.placeholder'),
@@ -157,56 +157,101 @@ function EmptyState({ onScan }) {
  * Lightweight dropdown menu: `trigger` is a render-prop (setOpen, open),
  * `items` is a list of { label, hint?, icon?, onClick?, divider?, disabled? }.
  *
- * The menu is PORTALLED to the panel root and positioned relative to the
- * panel: anchoring it inside the trigger (a list card) would let the list's
- * overflow clip it and let sibling cards paint over it — the "menu hidden
- * behind the plugin body" bug.
+ * THE MENU IS PORTALLED TO <body> AND POSITIONED IN VIEWPORT COORDINATES.
+ *
+ * That is not cosmetic — it is what keeps the menu usable: the panel clips its
+ * children (`overflow: hidden`) and the list scrolls, so a menu anchored inside
+ * a card gets cut off at the panel edge, and sibling content can paint over it
+ * (the "menu hidden behind the plugin body" bug). Portalling to <body> with
+ * `position: fixed` puts it outside every clipping and stacking context the
+ * host creates, so no container can cut it and no sibling can cover it.
+ *
+ * Placement is measured, not guessed: the menu's real height is read after it
+ * mounts, then it is flipped up only when the space below is genuinely too
+ * small, and its max-height is clamped to the space available on that side —
+ * so it scrolls inside the viewport instead of running off it.
  */
 function Dropdown({ trigger, items, align = 'left' }) {
   const [open, setOpen] = React.useState(false)
   const [pos, setPos] = React.useState(null)
   const ref = React.useRef(null)
+  const menuRef = React.useRef(null)
+
+  const place = React.useCallback(() => {
+    const el = ref.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    const M = 8
+    const GAP = 4
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const menuW = Math.min(280, Math.max(200, vw - M * 2))
+    // Real height once the menu exists; before that, estimate from the rows.
+    const realH = menuRef.current?.offsetHeight
+    const menuH = realH || Math.min(320, items.length * 34 + 8)
+    const below = vh - r.bottom - GAP - M
+    const above = r.top - GAP - M
+    const up = below < Math.min(menuH, 180) && above > below
+    const avail = Math.max(120, up ? above : below)
+    const h = Math.min(menuH, avail)
+    let left = align === 'right' ? r.right - menuW : r.left
+    left = Math.max(M, Math.min(left, vw - menuW - M))
+    const top = up ? Math.max(M, r.top - GAP - h) : r.bottom + GAP
+    // Skip the state update when nothing moved: the scroll/resize trackers
+    // fire continuously while the list scrolls, and a fresh object here would
+    // re-render the menu on every frame for no visual change.
+    setPos((prev) => {
+      if (prev && prev.left === left && prev.top === top && prev.menuW === menuW && prev.maxH === avail) return prev
+      return { left, top, menuW, maxH: avail }
+    })
+  }, [align, items.length])
+
+  // Runs before paint, so the measured placement is what the user sees —
+  // no first-frame jump from the guessed position.
+  React.useLayoutEffect(() => {
+    if (!open) {
+      setPos(null)
+      return
+    }
+    place()
+  }, [open, place])
 
   React.useEffect(() => {
     if (!open) return
-    const update = () => {
-      const triggerEl = ref.current
-      if (!triggerEl) return
-      const panelEl = triggerEl.closest('.zt-panel')
-      const pr = panelEl?.getBoundingClientRect() ?? { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight }
-      const r = triggerEl.getBoundingClientRect()
-      const menuW = Math.min(280, Math.max(200, pr.right - pr.left - 16))
-      // Flip upward only when there is genuinely no room below inside the panel.
-      const below = pr.bottom - r.bottom
-      const above = r.top - pr.top
-      const up = below < 200 && above > below
-      const left = Math.max(8, Math.min(align === 'right' ? r.right - menuW : r.left, pr.right - menuW - 8) - pr.left)
-      const top = up ? Math.max(8, r.top - pr.top - 4 - 240) : r.bottom - pr.top + 4
-      setPos({ left, top, menuW })
-    }
-    update()
-    window.addEventListener('resize', update)
     const onDoc = (e) => {
-      const insideMenu = typeof e.target?.closest === 'function' && !!e.target.closest('.zt-menu')
-      if (!ref.current?.contains(e.target) && !insideMenu) setOpen(false)
+      const target = e.target
+      if (ref.current?.contains(target)) return
+      if (typeof target?.closest === 'function' && target.closest('.zt-menu')) return
+      setOpen(false)
     }
     const onEsc = (e) => e.key === 'Escape' && setOpen(false)
+    // The menu is fixed to the viewport, so it has to track its trigger when
+    // anything moves (window resize, list scroll, panel resize).
+    const onMove = () => place()
     document.addEventListener('mousedown', onDoc)
     document.addEventListener('keydown', onEsc)
+    window.addEventListener('resize', onMove)
+    window.addEventListener('scroll', onMove, true)
     return () => {
-      window.removeEventListener('resize', update)
       document.removeEventListener('mousedown', onDoc)
       document.removeEventListener('keydown', onEsc)
+      window.removeEventListener('resize', onMove)
+      window.removeEventListener('scroll', onMove, true)
     }
-  }, [open, align])
+  }, [open, place])
 
   const menuEl = open
     ? ReactDOM.createPortal(
-        h('div', {
-          className: 'zt-menu',
-          'data-align': align,
-          style: pos ? { left: pos.left, top: pos.top, position: 'absolute', width: pos.menuW, minWidth: 'auto' } : null,
-        },
+        h(
+          'div',
+          {
+            ref: menuRef,
+            className: 'zt-menu',
+            'data-align': align,
+            style: pos
+              ? { left: pos.left, top: pos.top, width: pos.menuW, maxHeight: pos.maxH }
+              : { left: 0, top: 0, visibility: 'hidden' },
+          },
           ...items.map((it, i) =>
             it.divider
               ? h('div', { key: i, className: 'zt-menu-divider' })
@@ -230,16 +275,11 @@ function Dropdown({ trigger, items, align = 'left' }) {
                 ),
           ),
         ),
-        ref.current?.closest('.zt-panel') ?? document.body,
+        document.body,
       )
     : null
 
-  return h(
-    'span',
-    { ref, style: { position: 'relative', display: 'inline-flex' } },
-    trigger(setOpen, open),
-    menuEl,
-  )
+  return h('span', { ref, style: { position: 'relative', display: 'inline-flex' } }, trigger(setOpen, open), menuEl)
 }
 
 /** Clipboard with a legacy fallback (the host is a Chromium renderer). */

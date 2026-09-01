@@ -41,10 +41,11 @@ const CSS = `
 .zt-panel[hidden] { display: none; }
 
 /* When embedded as a tab inside dsh-better-sidebar's right panel, the panel
-   stops being a floating window and fills its host container. It must stay a
-   positioning context (relative) so absolutely-positioned children — toasts,
-   menus, AI floating bars — anchor to the panel instead of flying off to the
-   host's nearest positioned ancestor (where they would be invisible). */
+   stops being a floating window and fills its host container. It stays a
+   positioning context (relative) AND a stacking context (z-index), so
+   panel-scoped children — toasts, resize handles — stack inside the panel
+   instead of escaping into the host's layer soup. Anything that must escape
+   the panel's overflow (menus, AI bars) is portalled to <body>. */
 .zt-panel.zt-panel-embedded {
   position: relative;
   inset: auto;
@@ -55,7 +56,7 @@ const CSS = `
   border: none;
   border-radius: 0;
   box-shadow: none;
-  z-index: auto;
+  z-index: 1;
 }
 .zt-panel-embedded .zt-handle-l,
 .zt-panel-embedded .zt-handle-br { display: none; }
@@ -74,7 +75,7 @@ const CSS = `
 .zt-header:active { cursor: grabbing; }
 
 .zt-title {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
   font-size: 14px;
   font-weight: 500;
@@ -82,6 +83,8 @@ const CSS = `
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Status chips never shrink — they are short and must stay legible. */
+.zt-header .zt-badge { flex: 0 0 auto; }
 
 .zt-iconbtn {
   display: inline-flex;
@@ -149,7 +152,9 @@ const CSS = `
   word-break: break-all;
 }
 
-.zt-row { display: flex; align-items: center; gap: 8px; }
+/* flex-wrap so a narrow panel stacks controls instead of squeezing them into
+   unreadable slivers — the panel can go down to 280px inside a sidebar. */
+.zt-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .zt-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 
 .zt-btn {
@@ -209,20 +214,27 @@ const CSS = `
 @keyframes zt-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
 .zt-banner {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   padding: 8px 12px; font-size: 13px;
   border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.18));
   background: var(--dsw-alias-state-warn-secondary, rgba(176,96,0,.08));
   color: var(--dsw-alias-state-warn-label, #8a4b00);
+  /* min-width:0 lets the text shrink (and wrap) instead of pushing the action
+     button out of the panel on narrow layouts. */
+  min-width: 0;
 }
+.zt-banner > span { flex: 1 1 160px; min-width: 0; }
 .zt-banner-row { justify-content: space-between; }
 .zt-banner-btn { flex: 0 0 auto; height: 24px; padding: 0 10px; font-size: 12px; }
 
-.zt-toolbar { display: flex; align-items: center; gap: 8px; padding: 8px; border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.18)); flex: 0 0 auto; overflow-x: auto; }
-.zt-toolbar .zt-iconbtn { flex: 0 0 auto; }
-.zt-toolbar .zt-input { flex: 0 1 220px; }
+.zt-toolbar { display: flex; align-items: center; gap: 8px; padding: 8px; border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.18)); flex: 0 0 auto; overflow-x: auto; scrollbar-width: thin; }
+/* Every control keeps its intrinsic width; the toolbar scrolls rather than
+   squeezing buttons into unclickable slivers. */
+.zt-toolbar .zt-iconbtn,
+.zt-toolbar .zt-btn { flex: 0 0 auto; }
+.zt-toolbar .zt-input { flex: 0 1 220px; min-width: 140px; }
 .zt-input {
-  flex: 1; min-width: 0; height: 28px; padding: 0 8px;
+  flex: 1 1 auto; min-width: 0; height: 28px; padding: 0 8px;
   border: 1px solid var(--dsw-alias-border-l2, rgba(128,128,128,.24));
   border-radius: 8px; background: var(--dsw-alias-bg-base, #fff);
   color: var(--dsw-alias-label-primary, #1f1f1f);
@@ -265,20 +277,24 @@ const CSS = `
 .zt-highlight[data-color='pink']   { background: rgba(244, 114, 182, .34); }
 
 /* ---- AI assist floating bars & ask box ----
-   Anchored to the reader's scroll container (position: relative), not the
-   viewport: position:fixed breaks inside dsh-better-sidebar because host
-   containers may create transforms/containing blocks. */
+   Portalled to <body> in viewport coordinates (position:fixed) for the same
+   reason as the menu: the reader's scroll container clips with overflow:auto,
+   so an absolutely-positioned bar anchored inside it gets cut off near the
+   edges — and on a narrow panel a 300px bar does not fit at all. Fixed
+   positioning makes the bar viewport-sized and never clipped; scrolling closes
+   it (see panel.cjs) so it can never drift away from its selection. */
 .zt-ai-float {
-  position: absolute;
-  z-index: 3030;
+  position: fixed;
+  z-index: 100020;
   display: flex;
   align-items: center;
   gap: 2px;
+  max-width: calc(100vw - 16px);
   padding: 4px;
   background: var(--dsw-alias-bg-overlay, #fff);
   border: 1px solid var(--dsw-alias-border-l2, rgba(128,128,128,.24));
   border-radius: 10px;
-  box-shadow: var(--dsw-shadow-lv2, 0 4px 12px 0 rgba(0,0,0,.12));
+  box-shadow: var(--dsw-shadow-lv3, 0 8px 24px 0 rgba(0,0,0,.16));
   font-size: 12px;
 }
 .zt-ai-float-btn {
@@ -310,27 +326,38 @@ const CSS = `
 }
 .zt-ai-ask {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
   padding: 8px;
   border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.18));
   background: var(--dsw-alias-bg-layer-1, #fafafa);
 }
-.zt-ai-ask .zt-input { flex: 1; }
+.zt-ai-ask .zt-input { flex: 1 1 160px; min-width: 0; }
 
-.zt-toc { max-height: 40%; overflow: auto; border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.18)); padding: 8px; }
+/* Never shrink used to be the rule here — but outline, search and notes are
+   all .zt-toc panes and can be open AT THE SAME TIME (40% + 40% + 25% > 100%),
+   which squeezed the reader canvas down to nothing. flex-shrink lets the
+   panes share the leftover height instead: the canvas always keeps its share. */
+.zt-toc { flex: 0 1 auto; min-height: 0; max-height: 40%; overflow: auto; border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.18)); padding: 8px; }
 .zt-toc button {
   display: block; width: 100%; text-align: left; padding: 4px 8px; margin: 0;
   border: none; border-radius: 6px; background: transparent;
   color: var(--dsw-alias-label-secondary, #666); font-size: 13px; font-family: inherit; cursor: pointer;
+  /* Long outline entries must ellipsize, not stretch the panel. */
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .zt-toc button:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); }
 .zt-toc button[data-depth='1'] { padding-left: 20px; }
 .zt-toc button[data-depth='2'] { padding-left: 32px; }
 .zt-toc button[data-depth='3'] { padding-left: 44px; }
 
-/* ---- settings ---- */
-.zt-settings { padding: 16px; overflow-y: auto; }
+/* ---- settings ----
+   flex + min-height:0 are load-bearing: the panel body is a flex column with
+   overflow:hidden, so a page that does not claim the remaining height gets
+   sized to its content and its lower half is clipped with no way to scroll to
+   it (that is why the bottom of the settings form used to be unreachable). */
+.zt-settings { flex: 1 1 auto; min-height: 0; padding: 16px; overflow-y: auto; }
 .zt-field { margin-bottom: 16px; }
 .zt-field > label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 4px; color: var(--dsw-alias-label-primary, #1f1f1f); }
 .zt-field > .zt-hint { margin-top: 4px; }
@@ -341,10 +368,16 @@ const CSS = `
   color: var(--dsw-alias-label-primary, #1f1f1f); font-size: 13px; font-family: inherit;
 }
 
-/* ---- diff ---- */
-.zt-diff { padding: 16px; overflow-y: auto; }
-.zt-diff table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.zt-diff th, .zt-diff td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.18)); vertical-align: top; }
+/* ---- diff ----
+   The table compares long field values; on a narrow panel it must scroll
+   horizontally instead of overflowing (and being clipped by the panel). */
+.zt-diff { flex: 1 1 auto; min-height: 0; padding: 16px; overflow: auto; }
+.zt-diff table { width: 100%; min-width: 320px; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
+.zt-diff th, .zt-diff td {
+  text-align: left; padding: 6px 8px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.18));
+  vertical-align: top; overflow-wrap: anywhere;
+}
 .zt-diff th { color: var(--dsw-alias-label-secondary, #666); font-weight: 500; white-space: nowrap; }
 .zt-diff td.del { color: var(--dsw-alias-state-error-primary, #d93025); }
 .zt-diff td.add { color: var(--dsw-alias-state-success-primary, #137333); }
@@ -363,7 +396,8 @@ const CSS = `
 
 /* ---- candidate results (loose search) ---- */
 .zt-candidates {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-height: 0;
   max-height: 40%;
   overflow-y: auto;
   padding: 8px;
@@ -381,29 +415,43 @@ const CSS = `
   background: var(--dsw-alias-bg-layer-2, #fff);
 }
 .zt-cand:hover { border-color: var(--dsw-alias-border-l2, rgba(128,128,128,.28)); }
-.zt-cand-title { font-size: 13px; font-weight: 500; line-height: 1.35; }
+/* The text block takes the remaining width and may shrink; the action button
+   keeps its size. Without flex:1 here a long title pushed the button out. */
+.zt-cand > div { flex: 1 1 auto; min-width: 0; }
+.zt-cand-title {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 
-/* ---- dropdown menu ---- */
+/* ---- dropdown menu ----
+   Portalled to <body> and positioned in VIEWPORT coordinates (position:fixed):
+   anchoring inside the panel meant the panel's own overflow clipped a long
+   menu, and siblings could paint over it. Fixed + a far-above-host z-index
+   makes it impossible for any host container to clip or cover it. */
 .zt-menu {
-  position: absolute;
-  top: calc(100% + 4px);
+  position: fixed;
   min-width: 200px;
   max-width: 280px;
-  /* The panel clips its children (overflow hidden); a long menu must scroll
-     inside its own box instead of being cut off at the panel edge. */
-  max-height: min(60vh, 360px);
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 4px;
   background: var(--dsw-alias-bg-layer-2, #fff);
   border: 1px solid var(--dsw-alias-border-l2, rgba(128,128,128,.24));
   border-radius: 10px;
-  box-shadow: var(--dsw-shadow-lv2, 0 4px 12px 0 rgba(0,0,0,.08));
-  z-index: 3010;
+  box-shadow: var(--dsw-shadow-lv3, 0 8px 24px 0 rgba(0,0,0,.14));
+  z-index: 100010;
   display: flex;
   flex-direction: column;
 }
-.zt-menu[data-align='left'] { left: 0; }
-.zt-menu[data-align='right'] { right: 0; }
+/* Placement is fully measured in JS (ui.cjs Dropdown): inline left/top/width/
+   maxHeight are set per-open, so there are deliberately no CSS position rules
+   here — a leftover right:0 from the absolute era would fight the inline
+   geometry on over-constrained layouts. */
 .zt-menu-item {
   display: flex;
   align-items: center;
@@ -423,9 +471,17 @@ const CSS = `
 .zt-menu-item:active { background: var(--dsw-alias-interactive-bg-active, rgba(128,128,128,.2)); }
 .zt-menu-item[disabled] { opacity: .45; cursor: default; }
 .zt-menu-item[disabled]:hover { background: transparent; }
-.zt-menu-icon { display: inline-flex; color: var(--dsw-alias-label-secondary, #666); }
-.zt-menu-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.zt-menu-hint { font-size: 12px; color: var(--dsw-alias-label-tertiary, #8a8a8a); }
+.zt-menu-icon { display: inline-flex; flex: 0 0 auto; color: var(--dsw-alias-label-secondary, #666); }
+.zt-menu-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zt-menu-hint {
+  flex: 0 0 auto;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary, #8a8a8a);
+}
 .zt-menu-divider { height: 1px; margin: 4px 0; background: var(--dsw-alias-border-l1, rgba(128,128,128,.18)); }
 
 /* ---- import banner ---- */
@@ -442,8 +498,12 @@ const CSS = `
   color: #ffffff;
   font-size: 13px;
   box-shadow: 0 4px 12px 0 rgba(0,0,0,.18);
-  z-index: 3020;
+  /* Panel-scoped: the panel is a stacking context, so a local layer is enough
+     and keeps the toast from escaping into the host's z-index space. */
+  z-index: 60;
   pointer-events: none;
+  max-width: calc(100% - 24px);
+  text-align: center;
   animation: zt-toast-in .2s var(--ds-ease-in-out, cubic-bezier(.4,0,.2,1));
 }
 @keyframes zt-toast-in { from { opacity: 0; transform: translateX(-50%) translateY(6px); } }

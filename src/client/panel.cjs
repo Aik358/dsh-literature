@@ -1,5 +1,6 @@
 const React = require('react')
 const h = React.createElement
+const ReactDOM = require('react-dom')
 const { useState, useEffect, useRef, useSyncExternalStore, useCallback } = React
 
 const store = require('./store.cjs')
@@ -195,7 +196,7 @@ function ItemCard({ item }) {
     },
     h('div', { className: 'zt-row', style: { justifyContent: 'space-between', marginBottom: 4 } },
       h('div', { className: 'zt-row', style: { minWidth: 0 } },
-        h(Badge, { tone }, t('state.' + item.state)),
+        stateStr ? h(Badge, { tone }, t('state.' + stateStr)) : null,
         item.state === 'duplicate' ? h(Badge, { tone: 'warn' }, t('state.duplicate')) : null,
       ),
       savedBadge,
@@ -402,16 +403,9 @@ function PanelHeader({ onClose, embedded = false }) {
     document.addEventListener('mouseup', up)
   }
 
-  const style = {}
-  if (state.geometry.x != null) style.left = state.geometry.x
-  if (state.geometry.y != null) style.top = state.geometry.y
-  if (state.geometry.x == null && state.geometry.y == null) {
-    style.right = 8
-  }
-
   return h(
     'div',
-    { className: 'zt-header', ref: dragRef, style, onMouseDown: onDragStart },
+    { className: 'zt-header', ref: dragRef, onMouseDown: onDragStart },
     h('div', { className: 'zt-row', style: { gap: 4 } }, statusBadge),
     h('span', { className: 'zt-title', title: t('panelTitle') }, t('panelTitle')),
     h(IconButton, { title: t('settingsTooltip'), onClick: () => store.setView(state.view === 'settings' ? 'list' : 'settings') }, h(Icon.Settings, { size: 16 })),
@@ -606,35 +600,44 @@ function Reader({ item }) {
     return h('div', { className: 'zt-empty' }, h('h4', null, t('reader.notDownloaded')), h('p', null, t('action.download')))
   }
 
-  // Convert viewport coordinates from the viewer into the scroll container's
-  // content coordinates, so the floating bars stay glued to the selection
-  // (and survive the host's transforms, which would break position:fixed).
-  const toScrollCoords = (pt) => {
-    const el = scrollRef.current
-    if (!el || !pt) return null
-    const r = el.getBoundingClientRect()
+  // The viewer reports selection/highlight positions in VIEWPORT coordinates,
+  // and the bars are portalled to <body> as position:fixed — so they need no
+  // conversion, only clamping to keep them fully on screen. Portalling is what
+  // stops the reader's overflow:auto from clipping them near the edges (and
+  // stops a narrow panel from cutting a bar that is wider than it).
+  const clampBar = (pt) => {
+    if (!pt) return null
+    const M = 8
+    const w = 300
+    const hgt = 44
     return {
-      left: Math.max(4, Math.min(pt.x - r.left + el.scrollLeft - 96, Math.max(4, el.clientWidth - 300))),
-      top: Math.max(4, pt.y - r.top + el.scrollTop - 46),
+      left: Math.max(M, Math.min((pt.x ?? 0) - w / 2, Math.max(M, window.innerWidth - w - M))),
+      top: Math.max(M, Math.min((pt.y ?? 0) - hgt - 8, Math.max(M, window.innerHeight - hgt - M))),
     }
   }
-  const selPos = toScrollCoords(selMenu)
-  const hlPos = toScrollCoords(hlMenu)
+  const selPos = clampBar(selMenu)
+  const hlPos = clampBar(hlMenu)
 
   const selectionBar = selMenu && selPos
-    ? h('div', { className: 'zt-ai-float', style: { left: selPos.left, top: selPos.top } },
-        h('button', { type: 'button', className: 'zt-ai-float-btn', onClick: () => runAi({ action: 'translate', selection: selMenu.text }) }, t('ai.translate')),
-        h('button', { type: 'button', className: 'zt-ai-float-btn', onClick: () => runAi({ action: 'explain', selection: selMenu.text }) }, t('ai.explain')),
-        h('button', { type: 'button', className: 'zt-ai-float-btn', onClick: () => runAi({ action: 'summarize', selection: selMenu.text }) }, t('ai.summarize')),
-        h('button', { type: 'button', className: 'zt-ai-float-btn zt-ai-float-btn-accent', onClick: highlightSelection }, t('ai.highlight')),
+    ? ReactDOM.createPortal(
+        h('div', { className: 'zt-ai-float', style: { left: selPos.left, top: selPos.top } },
+          h('button', { type: 'button', className: 'zt-ai-float-btn', onClick: () => runAi({ action: 'translate', selection: selMenu.text }) }, t('ai.translate')),
+          h('button', { type: 'button', className: 'zt-ai-float-btn', onClick: () => runAi({ action: 'explain', selection: selMenu.text }) }, t('ai.explain')),
+          h('button', { type: 'button', className: 'zt-ai-float-btn', onClick: () => runAi({ action: 'summarize', selection: selMenu.text }) }, t('ai.summarize')),
+          h('button', { type: 'button', className: 'zt-ai-float-btn zt-ai-float-btn-accent', onClick: highlightSelection }, t('ai.highlight')),
+        ),
+        document.body,
       )
     : null
 
   const highlightBar = hlMenu && hlPos
-    ? h('div', { className: 'zt-ai-float', style: { left: hlPos.left, top: hlPos.top } },
-        h('span', { className: 'zt-hl-float-text', title: hlMenu.annotation?.text ?? '' }, (hlMenu.annotation?.text ?? '').slice(0, 24)),
-        h('button', { type: 'button', className: 'zt-ai-float-btn', onClick: () => ctrlRef.current?.goToPage(hlMenu.annotation.pageIndex + 1) }, t('ai.jump')),
-        h('button', { type: 'button', className: 'zt-ai-float-btn zt-ai-float-btn-danger', onClick: () => deleteHighlight(hlMenu.annotation.id) }, t('reader.deleteAnnotation')),
+    ? ReactDOM.createPortal(
+        h('div', { className: 'zt-ai-float', style: { left: hlPos.left, top: hlPos.top } },
+          h('span', { className: 'zt-hl-float-text', title: hlMenu.annotation?.text ?? '' }, (hlMenu.annotation?.text ?? '').slice(0, 24)),
+          h('button', { type: 'button', className: 'zt-ai-float-btn', onClick: () => ctrlRef.current?.goToPage(hlMenu.annotation.pageIndex + 1) }, t('ai.jump')),
+          h('button', { type: 'button', className: 'zt-ai-float-btn zt-ai-float-btn-danger', onClick: () => deleteHighlight(hlMenu.annotation.id) }, t('reader.deleteAnnotation')),
+        ),
+        document.body,
       )
     : null
 
@@ -716,12 +719,11 @@ function Reader({ item }) {
     aiPanel,
     error ? h('div', { className: 'zt-error', style: { padding: 16 } }, error) : null,
     !ready && !error ? h('div', { className: 'zt-empty' }, h(Spinner, { size: 20 }), h('p', null, t('reader.loading'))) : null,
-    // The floating bars live INSIDE the scroll container so they inherit its
-    // positioning context (the container is the positioned ancestor).
-    h('div', { className: 'zt-reader-scroll', ref: scrollRef, onScroll: (e) => { updatePage(); setSelMenu(null); setHlMenu(null) } },
-      selectionBar,
-      highlightBar,
-    ),
+    h('div', { className: 'zt-reader-scroll', ref: scrollRef, onScroll: (e) => { updatePage(); setSelMenu(null); setHlMenu(null) } }),
+    // selectionBar / highlightBar are React portals (see above) — their DOM
+    // lives on <body> as position:fixed, so nothing renders at these spots.
+    selectionBar,
+    highlightBar,
     annotations.length
       ? h(
           'div',
@@ -789,16 +791,19 @@ function PanelBody() {
 
 function Panel({ onClose, embedded = false }) {
   const state = useStore()
-  // Connect the SSE progress stream while the panel is mounted and release it
-  // on unmount (panel closed / tab hidden). Keeping a permanently-open stream
-  // drains the browser's same-origin connection pool (~6), which queues PDF
-  // fetches behind it — the reader appears to hang on "正在加载 PDF…" until a
-  // page reload frees the sockets.
+  const open = embedded ? true : state.open
+  // Connect the SSE progress stream ONLY while the panel is actually visible.
+  // In footer mode the Panel component stays mounted (the overlay slot keeps
+  // it registered) even while rendering null, so a mount-scoped effect would
+  // hold one same-origin connection forever; keying on visibility releases it
+  // the moment the panel closes. The pool has ~6 connections and DSH itself
+  // keeps several open — every held connection queues PDF fetches behind it.
   useEffect(() => {
+    if (!open) return undefined
     store.ensureEvents()
     return () => store.releaseEvents()
-  }, [])
-  if (!state.open && !embedded) return null
+  }, [open])
+  if (!open) return null
 
   const zoteroRunning = state.zotero?.running === true
   // Warn only when the current mode actually depends on the external app.
@@ -816,11 +821,25 @@ function Panel({ onClose, embedded = false }) {
     }
   }
 
+  // Positioning lives on the ROOT (the only fixed-positioned element). The
+  // header is statically positioned, so left/top on it did nothing — the
+  // floating window simply never moved. Once a dragged position exists we
+  // must also neutralise the stylesheet's right/bottom anchors, or the panel
+  // gets stretched between the dragged top-left corner and the fixed
+  // bottom-right one (height changes as you drag).
+  const rootStyle = { width: state.geometry.width }
+  if (state.geometry.x != null || state.geometry.y != null) {
+    rootStyle.left = state.geometry.x ?? null
+    rootStyle.top = state.geometry.y ?? 8
+    rootStyle.right = 'auto'
+    rootStyle.bottom = 'auto'
+  }
+
   return h(
     'div',
     {
       className: embedded ? 'zt-panel zt-panel-embedded' : 'zt-panel',
-      style: embedded ? undefined : { width: state.geometry.width },
+      style: embedded ? undefined : rootStyle,
     },
     h(PanelHeader, { onClose, embedded }),
     !state.loaded && state.loadError ? h('div', { className: 'zt-banner' }, t('banner.offline')) : null,
@@ -842,10 +861,13 @@ function Panel({ onClose, embedded = false }) {
 
 /**
  * Container rendered inside a `dsh-better-sidebar` tab. The host passes
- * `visible` (active + panel open); we keep the component mounted so the PDF
- * reader doesn't reload on every tab switch.
+ * `visible` (active + panel open); while the tab is hidden we unmount — that
+ * releases the SSE stream and stops background rendering. The cost is the
+ * reader re-initialising on the next visit, which is the right trade: a
+ * permanently-held connection was queueing real work behind it.
  */
 function LibraryTab(props) {
+  if (props && props.visible === false) return null
   return h(Panel, { embedded: true, onClose: () => {} })
 }
 
