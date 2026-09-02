@@ -50,7 +50,9 @@ function apa(record) {
 
   if (record.itemType === 'journalArticle' || record.itemType === 'preprint') {
     const journal = record.container ? `*${record.container}*, ` : ''
-    const vol = record.volume ? `${record.volume}` : ''
+    // APA 7 italicises BOTH the journal name and the volume; the issue number
+    // in parentheses stays upright. `*Psychology of Popular Media Culture*, *8*(3), 207–217.`
+    const vol = record.volume ? `*${record.volume}*` : ''
     const issue = record.issue ? `(${record.issue})` : ''
     const pages = pagesStr(record) ? `, ${pagesStr(record)}` : ''
     // Volume, issue and pages can each be absent independently — never drop
@@ -149,11 +151,14 @@ function chicago(record) {
   const who = list.length ? list.map((a) => `${a.firstName ?? ''} ${a.lastName ?? ''}`.trim()).join(', ') + '. ' : ''
   const title = (record.title ?? 'Untitled').trim()
   if (record.itemType === 'journalArticle' || record.itemType === 'preprint') {
-    const journal = record.container ? ` "${record.container}"` : ''
+    // Chicago 17 bibliography: the ARTICLE title takes quotes, the JOURNAL
+    // name takes italics — `Doe, Jane. "Title." *Journal* 12, no. 3 (2020): 45–67.`
+    // The old code quoted both, producing nested quotes around the journal.
+    const journal = record.container ? ` *${record.container}*` : ''
     const vol = record.volume ? ` ${record.volume}` : ''
     const issue = record.issue ? `, no. ${record.issue}` : ''
     const pages = pagesStr(record) ? `: ${pagesStr(record)}` : ''
-    return `${who}"${title}.${journal}" ${vol}${issue} (${yearStr(record)})${pages}.`.trim()
+    return `${who}"${title}."${journal}${vol}${issue} (${yearStr(record)})${pages}.`.replace(/\s+/g, ' ').replace(/ ,/g, ',').trim()
   }
   const pub = record.publisher ? ` ${record.publisher},` : ''
   return `${who}*${title}.*${pub} ${yearStr(record)}.`.trim()
@@ -218,32 +223,86 @@ const STYLES = {
 }
 
 /**
+ * The formatters above mark italics with `*…*` (Markdown-style). These two
+ * helpers turn that markup into display forms; the asterisks must never reach
+ * the user's clipboard as literal characters.
+ */
+
+/** Strips italic markers, leaving plain text. */
+export function stripItalic(text) {
+  return String(text ?? '').replace(/\*([^*]+)\*/g, '$1')
+}
+
+/** Splits `*italic*` markup into segments: [{ text, italic? }]. */
+export function toSegments(text) {
+  const s = String(text ?? '')
+  const out = []
+  const re = /\*([^*]+)\*/g
+  let last = 0
+  let m
+  while ((m = re.exec(s))) {
+    if (m.index > last) out.push({ text: s.slice(last, m.index) })
+    out.push({ text: m[1], italic: true })
+    last = m.index + m[0].length
+  }
+  if (last < s.length) out.push({ text: s.slice(last) })
+  return out.length ? out : [{ text: s }]
+}
+
+/** Escapes HTML special characters (order matters: ampersand first). */
+function escapeHtml(text) {
+  return String(text ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+/** Renders segments to HTML with real <i> italics. */
+export function segmentsToHtml(segments) {
+  return segments.map((seg) => (seg.italic ? `<i>${escapeHtml(seg.text)}</i>` : escapeHtml(seg.text))).join('')
+}
+
+/**
  * @param {object} record normalised metadata record
  * @param {object} opts { style: 'apa'|'gb'|'mla'|'chicago', mode: 'reference'|'intext'|'direct', pages?: string }
  */
 export function cite(record, opts = {}) {
+  return citeDetailed(record, opts).text
+}
+
+/**
+ * Same decision tree as above, but returns everything the UI dialog needs:
+ * plain text for the clipboard's text/plain flavor, segments for rendering,
+ * and pre-escaped HTML for the text/html flavor (pasting into Word/Docs
+ * preserves the italics).
+ */
+export function citeDetailed(record, opts = {}) {
   const style = STYLES[opts.style] ?? STYLES.apa
   const mode = opts.mode ?? 'reference'
 
   // BibTeX has no in-text / direct-quote semantics — it is always a reference.
-  if (opts.style === 'bibtex') return style.format(record)
+  if (opts.style === 'bibtex') {
+    const text = style.format(record)
+    return { text, segments: [{ text }], html: escapeHtml(text), style: opts.style, mode: 'reference' }
+  }
 
+  let raw
   if (mode === 'intext') {
     if (opts.style === 'gb') {
       // GB/T 7714 numeric style quotes by the bracketed number [n]; without a
       // running bibliography the author-year variant is the honest fallback.
-      return `（${authorsShortGb(record)}，${yearStr(record)}）`
+      raw = `（${authorsShortGb(record)}，${yearStr(record)}）`
+    } else {
+      raw = `(${authorsShort(record)}, ${yearStr(record)})`
     }
-    return `(${authorsShort(record)}, ${yearStr(record)})`
-  }
-
-  if (mode === 'direct') {
+  } else if (mode === 'direct') {
     const pages = opts.pages ? (opts.style === 'gb' ? `，第 ${opts.pages} 页` : `, p. ${opts.pages}`) : ''
-    if (opts.style === 'gb') return `“${(record.title ?? '').trim()}”（${authorsShortGb(record)}，${yearStr(record)}${pages}）`
-    return `"${(record.title ?? '').trim()}" (${authorsShort(record)}, ${yearStr(record)}${pages})`
+    if (opts.style === 'gb') raw = `“${(record.title ?? '').trim()}”（${authorsShortGb(record)}，${yearStr(record)}${pages}）`
+    else raw = `"${(record.title ?? '').trim()}" (${authorsShort(record)}, ${yearStr(record)}${pages})`
+  } else {
+    raw = style.format(record)
   }
 
-  return style.format(record)
+  const text = stripItalic(raw)
+  const segments = toSegments(raw)
+  return { text, segments, html: segmentsToHtml(segments), style: opts.style ?? 'apa', mode }
 }
 
 function authorsShortGb(record) {

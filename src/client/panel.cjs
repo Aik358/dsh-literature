@@ -11,6 +11,7 @@ const { createViewer, COLORS } = require('./pdf/viewer.cjs')
 const { renderMiniMd } = require('./md.cjs')
 const { SettingsPage } = require('./settings.cjs')
 const { ConflictDiff } = require('./diff.cjs')
+const { CitationDialog } = require('./cite-dialog.cjs')
 
 function useStore() {
   return useSyncExternalStore(store.subscribe, store.getSnapshot)
@@ -56,34 +57,29 @@ function identifierLine(item) {
   return bits.join('  ')
 }
 
-/** Builds the citation dropdown items for a card. */
-function citeMenuFor(item) {
-  const run = async (opts, label) => {
-    try {
-      const { text } = await store.citeItem(item.key, opts)
-      await copyText(text)
-      store.flash(t('action.copied', { label }))
-    } catch (e) {
-      store.flash(localizeError(e))
-    }
-  }
-  const promptPages = (style, label) => {
-    const pages = window.prompt(t('reader.pagesPrompt'), '12')
-    if (pages) run({ style, mode: 'direct', pages }, label)
-  }
+/**
+ * Builds the citation dropdown items for a card.
+ *
+ * Every entry OPENS THE DIALOG instead of copying silently: the user previews
+ * the reference with real italics, switches style/mode freely, and copies from
+ * there (plain or formatted). `openDialog` receives { item, style, mode } as
+ * the dialog's initial state.
+ */
+function citeMenuFor(item, openDialog) {
+  const open = (opts) => () => openDialog({ item, ...opts })
   return [
-    { label: t('cite.reference'), hint: 'APA 7th', onClick: () => run({ style: 'apa', mode: 'reference' }, 'APA') },
-    { label: t('cite.reference'), hint: 'GB/T 7714', onClick: () => run({ style: 'gb', mode: 'reference' }, 'GB/T 7714') },
-    { label: t('cite.reference'), hint: 'MLA 9th', onClick: () => run({ style: 'mla', mode: 'reference' }, 'MLA') },
-    { label: t('cite.reference'), hint: 'Chicago 17th', onClick: () => run({ style: 'chicago', mode: 'reference' }, 'Chicago') },
+    { label: t('cite.reference'), hint: 'APA 7th', onClick: open({ style: 'apa', mode: 'reference' }) },
+    { label: t('cite.reference'), hint: 'GB/T 7714', onClick: open({ style: 'gb', mode: 'reference' }) },
+    { label: t('cite.reference'), hint: 'MLA 9th', onClick: open({ style: 'mla', mode: 'reference' }) },
+    { label: t('cite.reference'), hint: 'Chicago 17th', onClick: open({ style: 'chicago', mode: 'reference' }) },
     { divider: true },
-    { label: t('cite.intext'), hint: 'APA', onClick: () => run({ style: 'apa', mode: 'intext' }, t('cite.intext')) },
-    { label: t('cite.intext'), hint: 'GB/T', onClick: () => run({ style: 'gb', mode: 'intext' }, t('cite.intext')) },
+    { label: t('cite.intext'), hint: 'APA', onClick: open({ style: 'apa', mode: 'intext' }) },
+    { label: t('cite.intext'), hint: 'GB/T', onClick: open({ style: 'gb', mode: 'intext' }) },
     { divider: true },
-    { label: t('cite.direct'), hint: 'APA', onClick: () => promptPages('apa', t('cite.direct')) },
-    { label: t('cite.direct'), hint: 'GB/T', onClick: () => promptPages('gb', t('cite.direct')) },
+    { label: t('cite.direct'), hint: 'APA', onClick: open({ style: 'apa', mode: 'direct' }) },
+    { label: t('cite.direct'), hint: 'GB/T', onClick: open({ style: 'gb', mode: 'direct' }) },
     { divider: true },
-    { label: t('cite.bibtex'), hint: 'JabRef / Overleaf', onClick: () => run({ style: 'bibtex', mode: 'reference' }, 'BibTeX') },
+    { label: t('cite.bibtex'), hint: 'JabRef / Overleaf', onClick: open({ style: 'bibtex', mode: 'reference' }) },
   ]
 }
 
@@ -107,6 +103,7 @@ function ItemCard({ item, selectMode, selected, onToggleSelect, onContextMenu })
   const stateStr = String(item.state ?? '')
   const error = localizeError(item.error) ?? (stateStr.endsWith('_failed') ? t('state.' + stateStr) : '')
   const tone = STATE_TONE[item.state] ?? 'info'
+  const [citeDialog, setCiteDialog] = useState(null)
 
   const actions = []
   if (item.state === 'discovered' || item.state === 'resolve_failed') {
@@ -163,7 +160,7 @@ function ItemCard({ item, selectMode, selected, onToggleSelect, onContextMenu })
         align: 'left',
         trigger: (setOpen, open) =>
           h(IconButton, { title: t('cite.title'), onClick: () => setOpen(!open) }, h(Icon.Quote, { size: 15 })),
-        items: citeMenuFor(item),
+        items: citeMenuFor(item, setCiteDialog),
       }),
       h(Dropdown, {
         key: 'search',
@@ -254,6 +251,7 @@ function ItemCard({ item, selectMode, selected, onToggleSelect, onContextMenu })
     task ? h(ProgressBar, { value: task.progress }) : null,
     error ? h('div', { className: 'zt-error' }, error) : null,
     h('div', { className: 'zt-actions' }, ...actions),
+    citeDialog ? h(CitationDialog, { key: 'cite-dialog', item: citeDialog.item, onClose: () => setCiteDialog(null) }) : null,
   )
 }
 
@@ -299,6 +297,7 @@ function ItemList() {
   const state = useStore()
   const [dragging, setDragging] = useState(false)
   const [ctxMenu, setCtxMenu] = useState(null)
+  const [citeDialog, setCiteDialog] = useState(null)
   const dragCounter = useRef(0)
 
   const onDragOver = (e) => {
@@ -438,7 +437,8 @@ function ItemList() {
           }),
         )
       : null,
-    ctxMenu ? h(ContextMenu, { key: 'ctx', x: ctxMenu.x, y: ctxMenu.y, items: citeMenuFor(ctxMenu.item), onClose: () => setCtxMenu(null) }) : null,
+    ctxMenu ? h(ContextMenu, { key: 'ctx', x: ctxMenu.x, y: ctxMenu.y, items: citeMenuFor(ctxMenu.item, setCiteDialog), onClose: () => setCtxMenu(null) }) : null,
+    citeDialog ? h(CitationDialog, { key: 'cite-dialog', item: citeDialog.item, onClose: () => setCiteDialog(null) }) : null,
   )
 }
 

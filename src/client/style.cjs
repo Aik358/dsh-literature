@@ -685,6 +685,62 @@ body[data-ds-dark-theme] .zt-reader[data-night-mode='auto'] .zt-highlight { mix-
   .zt-panel, .zt-card, .zt-btn, .zt-iconbtn, .zt-progress > i { transition: none; }
   .zt-skeleton { animation: none; }
 }
+
+/* ---- Citation dialog ---------------------------------------------------- */
+/* Above the portal layer (menus live at 100010): the backdrop must cover
+   every dropdown / context menu that could still be open under it. */
+.zt-modal-backdrop {
+  position: fixed; inset: 0; z-index: 100030;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.42);
+  animation: zt-fade-in .12s ease-out;
+}
+.zt-modal {
+  width: min(640px, calc(100vw - 32px));
+  max-height: min(80vh, 560px);
+  overflow-y: auto;
+  background: var(--dsw-alias-bg-layer-1, #fff);
+  color: var(--dsw-alias-label-primary, #1a1a1a);
+  border: 1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.25));
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0,0,0,.22);
+  padding: 14px;
+}
+.zt-tabs { display: flex; flex-wrap: wrap; gap: 4px; }
+.zt-tab {
+  border: 1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.25));
+  background: transparent;
+  color: inherit;
+  border-radius: 7px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.zt-tab:hover { background: var(--dsw-alias-bg-layer-2, rgba(128,128,128,.08)); }
+.zt-tab-active, .zt-tab-active:hover {
+  background: var(--dsw-alias-bg-brand, #2f6fed);
+  border-color: var(--dsw-alias-bg-brand, #2f6fed);
+  color: #fff;
+}
+/* Serif preview: references are read as typeset text, and italics must be
+   visible as italics — never as literal asterisks. */
+.zt-cite-preview {
+  border: 1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.2));
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-2, rgba(128,128,128,.05));
+  padding: 10px 12px;
+  font-family: Georgia, 'Times New Roman', 'Songti SC', 'SimSun', serif;
+  font-size: 13.5px;
+  line-height: 1.65;
+  word-break: break-word;
+  min-height: 44px;
+  display: flex; align-items: center;
+}
+@keyframes zt-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .zt-modal-backdrop { animation: none; }
+}
 `
 
 function ensureStyle() {

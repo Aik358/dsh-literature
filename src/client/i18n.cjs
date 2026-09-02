@@ -207,6 +207,11 @@ const zh = {
     intext: '文内引用',
     direct: '直接引用（输入页码）',
     bibtex: 'BibTeX 条目',
+    pagesLabel: '页码（可选）',
+    copyPlain: '复制',
+    copyRich: '复制带格式',
+    copyRichHint: '粘贴到 Word / Google Docs 时保留斜体',
+    citeHint: '斜体为期刊名 / 卷号（按所选规范）',
   },
   search: {
     title: '全网搜索',
@@ -476,6 +481,11 @@ const en = {
     intext: 'In-text citation',
     direct: 'Direct quote (with page)',
     bibtex: 'BibTeX entry',
+    pagesLabel: 'Pages (optional)',
+    copyPlain: 'Copy',
+    copyRich: 'Copy formatted',
+    copyRichHint: 'Keeps italics when pasted into Word / Google Docs',
+    citeHint: 'Italics mark journal names / volumes per the selected style',
   },
   search: {
     title: 'Search online',

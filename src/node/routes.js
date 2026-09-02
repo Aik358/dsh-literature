@@ -335,13 +335,15 @@ export async function handler(req, res, ctx) {
         writeJson(res, 404, { error: '条目缺少元数据，无法生成引用', code: 'noMetadataCite' })
         return
       }
-      const { cite } = await import('./cite.js')
-      const text = cite(item.record, {
+      const { citeDetailed } = await import('./cite.js')
+      // Returns text (plain), segments and pre-escaped html so the dialog can
+      // render real italics and copy an HTML flavor into Word/Docs.
+      const detail = citeDetailed(item.record, {
         style: body?.style ?? 'apa',
         mode: body?.mode ?? 'reference',
         pages: body?.pages,
       })
-      writeJson(res, 200, { text, style: body?.style ?? 'apa', mode: body?.mode ?? 'reference' })
+      writeJson(res, 200, { ...detail, style: body?.style ?? 'apa', mode: body?.mode ?? 'reference' })
       return
     }
 

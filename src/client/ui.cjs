@@ -379,6 +379,30 @@ async function copyText(text) {
   }
 }
 
+/**
+ * Copies with BOTH clipboard flavors: text/html (so italics survive pasting
+ * into Word / Google Docs) and text/plain. The async Clipboard API needs a
+ * secure context; on plain http (loopback dev) or when ClipboardItem is
+ * missing it degrades to plain text rather than failing.
+ */
+async function copyRich(html, text) {
+  try {
+    if (typeof ClipboardItem === 'function' && navigator.clipboard?.write) {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'text/html': new Blob([html], { type: 'text/html' }),
+          'text/plain': new Blob([text], { type: 'text/plain' }),
+        }),
+      ])
+      return true
+    }
+  } catch {
+    /* fall through to plain text */
+  }
+  await copyText(text)
+  return false
+}
+
 
 /** Downloads a string as a file through a Blob URL. */
 function downloadText(filename, text, mime = 'text/plain;charset=utf-8') {
@@ -398,4 +422,4 @@ function ProgressBar({ value }) {
   return h('div', { className: 'zt-progress' }, h('i', { style: { width: `${pct}%` } }))
 }
 
-module.exports = { Icon, Spinner, Badge, Button, IconButton, EmptyState, ProgressBar, Dropdown, ContextMenu, copyText, downloadText }
+module.exports = { Icon, Spinner, Badge, Button, IconButton, EmptyState, ProgressBar, Dropdown, ContextMenu, copyText, copyRich, downloadText }

@@ -549,6 +549,58 @@ const handler = prefix.handler
   check('bibtex book mapping', bibtex({ ...record, itemType: 'bookSection', container: 'Some Book' }).includes('@inbook'), 'inbook')
 }
 
+// 14c. Citation italics: the formatters mark italics with *…*; the public
+//      surface must never leak those asterisks, and the rich forms must turn
+//      them into real segments/HTML the dialog can render. Also guards two
+//      style rules: APA 7 italicises the VOLUME, and Chicago 17 uses italics
+//      (not quotes) for the journal name — the old code nested quotes there.
+{
+  const { cite, citeDetailed, toSegments, stripItalic, segmentsToHtml } = await import('../src/node/cite.js')
+  const record = {
+    itemType: 'journalArticle',
+    title: 'Deep contextualised word representations',
+    authors: [{ lastName: 'Peters', firstName: 'M' }],
+    year: 2018,
+    container: 'Transactions of the ACL',
+    volume: '6',
+    issue: '1',
+    pages: '107-121',
+    doi: '10.18653/v1/N18-1202',
+  }
+
+  const apa = citeDetailed(record, { style: 'apa', mode: 'reference' })
+  check('cite text carries no literal asterisks', !apa.text.includes('*'), apa.text)
+  check('apa italicises journal name', apa.segments.some((s) => s.italic && s.text === 'Transactions of the ACL'), JSON.stringify(apa.segments))
+  check('apa italicises volume (APA 7 rule)', apa.segments.some((s) => s.italic && s.text === '6'), JSON.stringify(apa.segments))
+  check('apa leaves issue upright', apa.segments.some((s) => !s.italic && s.text.includes('(1)')), JSON.stringify(apa.segments))
+  check('apa html has <i> markup', /<i>Transactions of the ACL<\/i>/.test(apa.html) && /<i>6<\/i>\(1\)/.test(apa.html), apa.html)
+
+  const chi = citeDetailed(record, { style: 'chicago', mode: 'reference' })
+  check('chicago italicises journal (not quotes)', chi.segments.some((s) => s.italic && s.text === 'Transactions of the ACL'), chi.text)
+  check('chicago no nested quotes', !chi.text.includes('""'), chi.text)
+
+  const mla = citeDetailed(record, { style: 'mla', mode: 'reference' })
+  check('mla italicises container', mla.segments.some((s) => s.italic && s.text === 'Transactions of the ACL'), mla.text)
+
+  const gb = citeDetailed(record, { style: 'gb', mode: 'reference' })
+  check('gb/t has no italics (correct for the standard)', !gb.segments.some((s) => s.italic), gb.text)
+
+  // Book titles italicise in APA / MLA / Chicago but not GB/T.
+  const book = { ...record, itemType: 'book', publisher: 'MIT Press' }
+  check('apa italicises book title', citeDetailed(book, { style: 'apa' }).segments.some((s) => s.italic && s.text === record.title), 'book title')
+  check('gb book stays upright', !citeDetailed(book, { style: 'gb' }).segments.some((s) => s.italic), 'gb book')
+
+  // Helper round-trip + escaping.
+  check('stripItalic removes markers', stripItalic('a *b* c'), 'a b c')
+  check('toSegments round-trips', toSegments('a *b* c').map((s) => s.text).join(''), 'abc')
+  check('segmentsToHtml escapes html', segmentsToHtml([{ text: '<x>&"y' }]), '&lt;x&gt;&amp;&quot;y')
+
+  // The plain cite() keeps working for export paths — now asterisk-free.
+  check('cite() returns clean text', cite(record, { style: 'apa' }) === apa.text, 'matches citeDetailed.text')
+  const intext = citeDetailed(record, { style: 'apa', mode: 'intext' })
+  check('intext has no italics', !intext.segments.some((s) => s.italic), intext.text)
+}
+
 // 15. ISBN resolve path end-to-end (live API; may be offline in sandbox)
 {
   const { resolveIdentifier } = await import('../src/node/metadata/index.js')
