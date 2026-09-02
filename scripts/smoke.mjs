@@ -76,6 +76,14 @@ const name = renderName(
 check('renders the template', name.startsWith('Jumper, John_2021_'), name)
 check('strips path separators', !/[\\/:*?"<>|]/.test(name), name)
 
+console.log('\n[mini markdown (5.12)]')
+const md = (await import('../src/client/md.cjs')).default
+check('bold renders', md.renderMiniMd('**key idea**') === '<strong>key idea</strong>')
+check('italic renders', md.renderMiniMd('*maybe*') === '<em>maybe</em>')
+check('inline code renders and protects asterisks', md.renderMiniMd('`a * b`') === '<code>a * b</code>')
+check('html is escaped before any markup', md.renderMiniMd('<b>x</b> & y').includes('&lt;b&gt;x&lt;/b&gt; &amp; y'))
+check('bold does not leak into italic pass', md.renderMiniMd('**b** *i*') === '<strong>b</strong> <em>i</em>')
+
 console.log('\n[zotero environment]')
 const dir = await resolveDataDir()
 console.log('  dataDir:', dir.dataDir, '| source:', dir.source)

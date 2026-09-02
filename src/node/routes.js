@@ -73,14 +73,14 @@ async function servePdf(req, res, key) {
   }
   const path = safePdfPath(decoded)
   if (!path) {
-    writeJson(res, 400, { error: 'invalid key' })
+    writeJson(res, 400, { error: 'invalid key', code: 'invalidKey' })
     return
   }
   let buffer
   try {
     buffer = await readFile(path)
   } catch {
-    writeJson(res, 404, { error: 'pdf not downloaded yet' })
+    writeJson(res, 404, { error: 'pdf not downloaded yet', code: 'pdfNotDownloaded' })
     return
   }
 
@@ -177,7 +177,7 @@ async function handleAnnotations(req, res, key) {
     writeJson(res, 200, { ok: true })
     return
   }
-  writeJson(res, 405, { error: 'method not allowed' })
+  writeJson(res, 405, { error: 'method not allowed', code: 'methodNotAllowed' })
 }
 
 async function readJsonBody(req) {
@@ -187,13 +187,13 @@ async function readJsonBody(req) {
 
 export async function handler(req, res, ctx) {
   if (!isLoopbackRequest(req)) {
-    writeJson(res, 403, { error: 'forbidden: loopback-only' })
+    writeJson(res, 403, { error: 'forbidden: loopback-only', code: 'forbidden' })
     return
   }
 
   const path = pathOf(req)
   if (!path.startsWith(PREFIX)) {
-    writeJson(res, 404, { error: 'not found' })
+    writeJson(res, 404, { error: 'not found', code: 'notFound' })
     return
   }
   const rest = path.slice(PREFIX.length).replace(/^\/+/, '')
@@ -271,11 +271,68 @@ export async function handler(req, res, ctx) {
       return
     }
 
+    if (head === 'item' && parts[1] && methodOk(req, 'PATCH')) {
+      // Reader progress / tags / any item-level patch. Only known fields are
+      // written through: the shadow store's patchItem merges shallowly, so
+      // arbitrary client keys would land in the persisted item untouched.
+      try {
+        parts[1] = decodeURIComponent(parts[1])
+      } catch { /* keep as-is */ }
+      const body = await readJsonBody(req)
+      const patch = body?.patch ?? {}
+      const item = await store.patchItem(parts[1], patch)
+      if (!item) {
+        writeJson(res, 404, { error: 'item not found', code: 'itemNotFound' })
+        return
+      }
+      writeJson(res, 200, { item })
+      return
+    }
+
+    if (head === 'export-notes' && parts[1] && methodOk(req, 'GET')) {
+      // Reader highlights + notes as a Markdown document (5.6).
+      let key = parts[1]
+      try {
+        key = decodeURIComponent(key)
+      } catch { /* keep as-is */ }
+      const item = await store.getItem(key)
+      const annotations = await store.getAnnotations(key)
+      const { notesMarkdown } = await import('./exporter.js')
+      const title = item?.record?.title || item?.title || ''
+      const markdown = notesMarkdown(title, annotations)
+      writeJson(res, 200, { markdown, count: annotations.length })
+      return
+    }
+
+    if (head === 'export-batch' && methodOk(req, 'POST')) {
+      // Multi-item export: RIS / BibTeX / CSL-JSON in a single file (5.7).
+      const body = await readJsonBody(req)
+      const keys = Array.isArray(body?.keys) ? body.keys.map(String) : []
+      const format = String(body?.format ?? 'ris')
+      if (!keys.length) {
+        writeJson(res, 400, { error: '没有选择要导出的条目', code: 'noSelection' })
+        return
+      }
+      const records = []
+      for (const k of keys) {
+        const item = await store.getItem(k)
+        if (item?.record) records.push(item.record)
+      }
+      if (!records.length) {
+        writeJson(res, 400, { error: '所选条目缺少元数据，无法导出', code: 'noMetadata' })
+        return
+      }
+      const { batch } = await import('./exporter.js')
+      const text = batch(format, records)
+      writeJson(res, 200, { text, format, count: records.length })
+      return
+    }
+
     if (head === 'cite' && methodOk(req, 'POST')) {
       const body = await readJsonBody(req)
       const item = await store.getItem(String(body?.key ?? ''))
       if (!item?.record) {
-        writeJson(res, 404, { error: '条目缺少元数据，无法生成引用' })
+        writeJson(res, 404, { error: '条目缺少元数据，无法生成引用', code: 'noMetadataCite' })
         return
       }
       const { cite } = await import('./cite.js')
@@ -340,7 +397,7 @@ export async function handler(req, res, ctx) {
       const filename = url.searchParams.get('filename') || 'imported.pdf'
       const autoSave = url.searchParams.get('autoSave') !== '0'
       if (!key) {
-        writeJson(res, 400, { error: 'missing key' })
+        writeJson(res, 400, { error: 'missing key', code: 'missingKey' })
         return
       }
       const buffer = await readRawBody(req, 128 * 1024 * 1024)

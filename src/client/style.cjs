@@ -107,6 +107,97 @@ const CSS = `
 
 .zt-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 
+.zt-listwrap { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.zt-filterbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.18));
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.zt-chip {
+  flex: 0 0 auto;
+  height: 22px;
+  padding: 0 10px;
+  border: 1px solid var(--dsw-alias-border-l2, rgba(128,128,128,.24));
+  border-radius: 999px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, #666);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.zt-chip:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); }
+.zt-chip-on {
+  background: var(--dsw-alias-brand-primary, #4d6bfe);
+  border-color: transparent;
+  color: var(--dsw-alias-label-primary-inverted, #fff);
+}
+/* tag chips on cards (5.8) */
+.zt-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+.zt-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 20px;
+  padding: 0 4px 0 8px;
+  border-radius: 4px;
+  background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12));
+  color: var(--dsw-alias-label-secondary, #666);
+  font-size: 11px;
+  max-width: 150px;
+}
+.zt-tag-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zt-tag-x {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px; padding: 0;
+  border: none; border-radius: 3px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary, #8a8a8a);
+  font-size: 10px;
+  cursor: pointer;
+}
+.zt-tag-x:hover { background: var(--dsw-alias-interactive-bg-active, rgba(128,128,128,.2)); color: var(--dsw-alias-state-error-primary, #d93025); }
+.zt-tag-add {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; padding: 0;
+  border: 1px dashed var(--dsw-alias-border-l2, rgba(128,128,128,.3));
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary, #8a8a8a);
+  font-size: 12px;
+  cursor: pointer;
+}
+.zt-tag-add:hover { color: var(--dsw-alias-brand-primary, #4d6bfe); border-color: var(--dsw-alias-brand-primary, #4d6bfe); }
+.zt-listbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.18));
+}
+.zt-selectbar {
+  flex: 0 0 auto;
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-top: 1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.18));
+  background: var(--dsw-alias-bg-layer-2, #fff);
+}
+.zt-check {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+.zt-check input { width: 14px; height: 14px; accent-color: var(--dsw-alias-brand-primary, #4d6bfe); cursor: pointer; }
 .zt-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
 .zt-list[data-dragging='1'] {
   outline: 2px dashed var(--dsw-alias-brand-primary, #4d6bfe);
@@ -243,9 +334,53 @@ const CSS = `
 
 /* ---- reader ---- */
 .zt-reader { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; background: var(--dsw-alias-bg-base, #fff); }
-.zt-reader-scroll { position: relative; flex: 1 1 auto; min-height: 0; overflow: auto; padding: 8px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.zt-reader-scroll { position: relative; flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto; padding: 8px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .zt-page { position: relative; background: #fff; box-shadow: var(--dsw-shadow-lv1, 0 2px 4px 0 rgba(0,0,0,.05)); line-height: 0; }
 .zt-page > canvas { display: block; width: 100%; height: auto; }
+
+/* thumbnails sidebar (5.11): fixed-width column, small canvases */
+.zt-reader-main { flex: 1 1 auto; min-height: 0; display: flex; }
+.zt-thumbs {
+  flex: 0 0 84px;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 8px 6px;
+  border-right: 1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.18));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  scrollbar-width: thin;
+}
+.zt-thumb {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.18));
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-1, #fafafa);
+  cursor: pointer;
+  font-size: 10px;
+  color: var(--dsw-alias-label-tertiary, #8a8a8a);
+  font-family: inherit;
+  max-width: 100%;
+}
+.zt-thumb:hover { border-color: var(--dsw-alias-brand-primary, #4d6bfe); }
+.zt-thumb canvas { display: block; width: 62px; height: auto; background: #fff; }
+
+/* mini-markdown in the notes pane (5.12) */
+.zt-note-md { color: var(--dsw-alias-label-secondary, #666); }
+.zt-note-md code {
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.14));
+  font-family: var(--ds-font-family-code, ui-monospace, monospace);
+  font-size: 11px;
+}
 
 /* pdf.js text layer, trimmed from pdf_viewer.css and re-themed. */
 .zt-page .textLayer {
@@ -275,6 +410,34 @@ const CSS = `
 .zt-highlight[data-color='green']  { background: rgba(34, 197, 94, .32); }
 .zt-highlight[data-color='blue']   { background: rgba(59, 130, 246, .30); }
 .zt-highlight[data-color='pink']   { background: rgba(244, 114, 182, .34); }
+
+/* ---- night reading mode (5.4) ----
+   'on' forces the invert; 'auto' follows the host dark theme purely via the
+   body[data-ds-dark-theme] attribute the theme runtime toggles (zero JS).
+   The hue-rotate keeps colours roughly true; highlights switch to screen
+   blending so they stay visible on the inverted surface. */
+.zt-page > canvas { transition: filter .2s var(--ds-ease-in-out, cubic-bezier(.4,0,.2,1)); }
+.zt-reader[data-night-mode='on'] .zt-page { background: #1e1e1e; box-shadow: none; }
+.zt-reader[data-night-mode='on'] .zt-page > canvas { filter: invert(0.92) hue-rotate(180deg); }
+.zt-reader[data-night-mode='on'] .zt-highlight { mix-blend-mode: screen; }
+body[data-ds-dark-theme] .zt-reader[data-night-mode='auto'] .zt-page { background: #1e1e1e; box-shadow: none; }
+body[data-ds-dark-theme] .zt-reader[data-night-mode='auto'] .zt-page > canvas { filter: invert(0.92) hue-rotate(180deg); }
+body[data-ds-dark-theme] .zt-reader[data-night-mode='auto'] .zt-highlight { mix-blend-mode: screen; }
+
+/* highlight colour palette dots in the selection toolbar (5.3) */
+.zt-color-group { display: inline-flex; align-items: center; gap: 6px; padding: 0 4px; }
+.zt-color-dot {
+  width: 16px; height: 16px; padding: 0; margin: 0;
+  border: 2px solid var(--dsw-alias-bg-overlay, #fff);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform .12s var(--ds-ease-in-out, cubic-bezier(.4,0,.2,1)), box-shadow .12s;
+}
+.zt-color-dot:hover { transform: scale(1.25); box-shadow: 0 0 0 1px var(--dsw-alias-border-l2, rgba(128,128,128,.3)); }
+.zt-color-dot[data-color='yellow'] { background: #facc15; }
+.zt-color-dot[data-color='green']  { background: #22c55e; }
+.zt-color-dot[data-color='blue']   { background: #3b82f6; }
+.zt-color-dot[data-color='pink']   { background: #f472b6; }
 
 /* ---- AI assist floating bars & ask box ----
    Portalled to <body> in viewport coordinates (position:fixed) for the same

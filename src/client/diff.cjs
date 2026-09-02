@@ -64,7 +64,7 @@ function ConflictDiff({ item, conflict }) {
       ? h(
           'table',
           null,
-          h('thead', null, h('tr', null, h('th', null, '字段'), h('th', null, '库中'), h('th', null, '新条目'))),
+          h('thead', null, h('tr', null, h('th', null, t('diff.colField')), h('th', null, t('diff.colInLibrary')), h('th', null, t('diff.colIncoming')))),
           h('tbody', null, ...diff.map((d) => row(d.field, d.before, d.after))),
         )
       : h('div', { className: 'zt-hint', style: { marginBottom: 12 } }, t('diff.noDiff')),

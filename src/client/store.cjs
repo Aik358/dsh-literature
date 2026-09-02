@@ -1,4 +1,5 @@
 const { api, subscribe: subscribeEvents } = require('./api.cjs')
+const { t, localizeError, subscribe: subscribeLocale, setPreference } = require('./i18n.cjs')
 
 /**
  * A minimal external store so components can use React 18's
@@ -6,6 +7,16 @@ const { api, subscribe: subscribeEvents } = require('./api.cjs')
  */
 
 const LS_KEY = 'dsh-literature:panel'
+const SORT_KEY = 'dsh-literature:sort'
+
+function readSort() {
+  try {
+    const v = localStorage.getItem(SORT_KEY)
+    return v === 'title' || v === 'year' ? v : 'created'
+  } catch {
+    return 'created'
+  }
+}
 
 function readPersisted() {
   try {
@@ -34,6 +45,13 @@ let state = {
   searchResults: [],
   searchQuery: '',
   searchLoading: false,
+  // Multi-select for batch export (5.7).
+  selectMode: false,
+  selection: [],
+  // Library filters (5.8) + sort (5.9, persisted).
+  statusFilter: 'all',
+  tagFilter: '',
+  sortBy: readSort(),
   // panel geometry, restored from localStorage
   geometry: {
     x: persisted.x ?? null,
@@ -82,6 +100,18 @@ function subscribe(fn) {
   return () => listeners.delete(fn)
 }
 
+/**
+ * Language switches must repaint every mounted component, but the translated
+ * strings are read synchronously via t() — they are not part of `state`. We
+ * therefore bump a counter so `state` gets a new identity: useSyncExternalStore
+ * compares snapshots by reference, so re-emitting an unchanged object would be
+ * ignored and the UI would stay in the old language until the next interaction.
+ */
+subscribeLocale(() => {
+  state = { ...state, localeVersion: (state.localeVersion ?? 0) + 1 }
+  emit()
+})
+
 function setBusy(key, on) {
   const busy = { ...state.busy }
   if (on) busy[key] = (busy[key] ?? 0) + 1
@@ -99,6 +129,9 @@ async function refresh() {
   set({ loadError: '' })
   try {
     const data = await api.state()
+    // The saved language preference is applied as soon as the config lands,
+    // before the first paint, so the panel never flashes the wrong language.
+    if (data.config?.uiLanguage) setPreference(data.config.uiLanguage)
     set({
       config: data.config,
       zotero: data.zotero,
@@ -108,7 +141,7 @@ async function refresh() {
       loaded: true,
     })
   } catch (e) {
-    set({ loadError: e.message, loaded: true })
+    set({ loadError: localizeError(e), loaded: true })
   }
 }
 
@@ -238,6 +271,71 @@ async function retryItem(key) {
   }
 }
 
+function toggleSelectMode() {
+  set({ selectMode: !state.selectMode, selection: state.selectMode ? [] : state.selection })
+}
+
+function toggleSelect(key) {
+  const cur = state.selection
+  const next = cur.includes(key) ? cur.filter((k) => k !== key) : [key, ...cur]
+  set({ selection: next })
+}
+
+function selectAllItems() {
+  set({ selection: state.items.map((i) => i.key), selectMode: true })
+}
+
+function clearSelection() {
+  set({ selection: [] })
+}
+
+async function exportSelected(format) {
+  const keys = state.selection.slice()
+  if (!keys.length) {
+    flash(t('list.noSelection'))
+    return
+  }
+  try {
+    const { text: payload, format: used } = await api.exportBatch(keys, format)
+    const ext = { ris: 'ris', bibtex: 'bib', 'csl-json': 'json' }[used] ?? 'txt'
+    const { downloadText } = require('./ui.cjs')
+    downloadText(`literature-export-${Date.now()}.${ext}`, payload, used === 'csl-json' ? 'application/json;charset=utf-8' : 'text/plain;charset=utf-8')
+    flash(t('list.exported') + ' ' + keys.length)
+  } catch (e) {
+    flash(localizeError(e))
+  }
+}
+
+function setStatusFilter(v) {
+  set({ statusFilter: v })
+}
+
+function setTagFilter(v) {
+  set({ tagFilter: v })
+}
+
+function setSortBy(v) {
+  const next = v === 'title' || v === 'year' ? v : 'created'
+  set({ sortBy: next })
+  try {
+    localStorage.setItem(SORT_KEY, next)
+  } catch { /* storage blocked */ }
+}
+
+/** Adds/removes a card's tags via the PATCH endpoint and mirrors locally. */
+async function setItemTags(key, tags) {
+  const list = Array.isArray(tags) ? tags.filter((x) => typeof x === 'string' && x.trim()) : []
+  if (!list.length && !Array.isArray(tags)) return
+  try {
+    const { item } = await api.patchItem(key, { tags: list })
+    set({ items: state.items.map((i) => (i.key === key ? item : i)) })
+    return item
+  } catch (e) {
+    flash(localizeError(e))
+    return null
+  }
+}
+
 async function discardItem(key) {
   setBusy(key, true)
   try {
@@ -255,7 +353,7 @@ async function showDiff(key) {
     const { conflict } = await api.diff(key)
     set({ conflict, view: 'diff', selectedKey: key })
   } catch (e) {
-    set({ conflict: { error: e.message }, view: 'diff' })
+    set({ conflict: { error: localizeError(e) }, view: 'diff' })
   }
 }
 
@@ -278,6 +376,9 @@ function setView(view) {
 
 async function saveConfig(patch) {
   const { config } = await api.saveConfig(patch)
+  // Applying the preference here makes a language switch take effect the
+  // moment it is saved — no panel reopen or page reload required.
+  if (patch?.uiLanguage) setPreference(patch.uiLanguage)
   set({ config })
   return config
 }
@@ -363,6 +464,15 @@ const store = {
   saveItem,
   retryItem,
   discardItem,
+  setStatusFilter,
+  setTagFilter,
+  setSortBy,
+  setItemTags,
+  toggleSelectMode,
+  toggleSelect,
+  selectAllItems,
+  clearSelection,
+  exportSelected,
   importPdf,
   scanDir,
   importZotero,

@@ -3,7 +3,7 @@ const h = React.createElement
 const { useState, useSyncExternalStore, useEffect } = React
 
 const store = require('./store.cjs')
-const { t } = require('./i18n.cjs')
+const { t, setPreference } = require('./i18n.cjs')
 const { Button, Spinner } = require('./ui.cjs')
 
 function useStore() {
@@ -116,6 +116,28 @@ function SettingsPage({ close }) {
       h('div', { className: 'zt-row' },
         h(Button, { variant: 'primary', onClick: persist }, saved ? t('settings.saved') : t('action.confirm')),
         close ? h(Button, { variant: 'ghost', onClick: close }, t('back')) : null,
+      ),
+    ),
+
+    h('div', { style: { fontSize: 13, fontWeight: 500, color: 'var(--dsw-alias-label-secondary, #666)', margin: '16px 0 8px' } }, t('settings.sectionLanguage')),
+    h(Field, { label: t('settings.uiLanguage'), hint: t('settings.uiLanguageHint') },
+      h(
+        'select',
+        {
+          value: form.uiLanguage ?? 'auto',
+          onChange: (e) => {
+            const v = e.target.value
+            set({ uiLanguage: v })
+            // Applied immediately and persisted on its own: waiting for
+            // "Confirm" would repaint this page while the button labels and
+            // every other string elsewhere were still in the old language.
+            setPreference(v)
+            store.saveConfig({ uiLanguage: v }).catch(() => {})
+          },
+        },
+        h('option', { value: 'auto' }, t('settings.lang.auto')),
+        h('option', { value: 'zh' }, t('settings.lang.zh')),
+        h('option', { value: 'en' }, t('settings.lang.en')),
       ),
     ),
 
@@ -248,6 +270,15 @@ function SettingsPage({ close }) {
         h('option', { value: 'fit-page' }, t('settings.fitPage')),
       ),
     ),
+    h(Field, { label: t('settings.nightMode') },
+      h(
+        'select',
+        { value: form.nightMode ?? 'auto', onChange: (e) => set({ nightMode: e.target.value }) },
+        h('option', { value: 'auto' }, t('settings.nightAuto')),
+        h('option', { value: 'on' }, t('settings.nightOn')),
+        h('option', { value: 'off' }, t('settings.nightOff')),
+      ),
+    ),
 
     h('div', { style: { fontSize: 13, fontWeight: 500, color: 'var(--dsw-alias-label-secondary, #666)', margin: '16px 0 8px' } }, t('settings.sectionImport')),
     h(Field, { label: t('settings.importDir'), hint: t('settings.importDirHint') },
@@ -297,7 +328,7 @@ function SettingsPage({ close }) {
     addingSource
       ? h('div', { className: 'zt-field', style: { marginTop: 8 } },
           h('label', null, t('settings.sourceLabel')),
-          h('input', { className: 'zt-input', value: draftLabel, placeholder: '校内镜像', onChange: (e) => setDraftLabel(e.target.value) }),
+          h('input', { className: 'zt-input', value: draftLabel, placeholder: t('action.sourcePlaceholder'), onChange: (e) => setDraftLabel(e.target.value) }),
           h('label', null, t('settings.sourceUrlTemplate')),
           h('input', { className: 'zt-input', value: draftTemplate, placeholder: 'https://mirror.example/{doi}', onChange: (e) => setDraftTemplate(e.target.value) }),
           h('label', null, t('settings.sourceHeaders')),

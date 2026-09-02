@@ -159,11 +159,62 @@ function chicago(record) {
   return `${who}*${title}.*${pub} ${yearStr(record)}.`.trim()
 }
 
+
+/** BibTeX value escaping: braces wrap every value, so only the characters
+ *  BibTeX treats specially inside a field need backslash-escaping. */
+function bibtexEscape(value) {
+  return String(value ?? '')
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/\\/g, '\\\\')
+    .replace(/[&%#$~^_]/g, (ch) => '\\' + ch)
+    .trim()
+}
+
+/** BibTeX entry. Key = lastName + year + first significant title word. */
+export function bibtex(record) {
+  const first = (record.authors ?? [])[0]
+  const year = record.year ? String(record.year) : ''
+  const title = (record.title ?? '').trim()
+  const word = (title.replace(/[^\p{L}\p{N}]+/gu, ' ').trim().split(/\s+/)[0] ?? '')
+  const key = [first?.lastName ?? 'unknown', year, word].filter(Boolean).join('').replace(/[^\p{L}\p{N}]+/gu, '')
+
+  const type = {
+    journalArticle: 'article',
+    book: 'book',
+    bookSection: 'inbook',
+    conferencePaper: 'inproceedings',
+    preprint: 'article',
+    thesis: 'phdthesis',
+    report: 'techreport',
+    dataset: 'misc',
+  }[record.itemType] ?? 'misc'
+
+  const containerKey = type === 'article' ? 'journal' : (type === 'inbook' || type === 'inproceedings') ? 'booktitle' : 'journal'
+  const fields = []
+  const authors = (record.authors ?? []).map((a) => [a.lastName, a.firstName].filter(Boolean).join(', ')).join(' and ')
+  if (authors) fields.push(['author', authors])
+  if (title) fields.push(['title', title])
+  if (record.container) fields.push([containerKey, record.container])
+  if (year) fields.push(['year', year])
+  if (record.volume) fields.push(['volume', String(record.volume)])
+  if (record.issue) fields.push(['number', String(record.issue)])
+  if (record.pages) fields.push(['pages', String(record.pages)])
+  if (record.publisher) fields.push(['publisher', String(record.publisher)])
+  if (record.doi) fields.push(['doi', String(record.doi)])
+  if (record.isbn) fields.push(['isbn', String(record.isbn)])
+  if (record.url) fields.push(['url', String(record.url)])
+  if (record.arxiv) fields.push(['note', 'arXiv:' + String(record.arxiv)])
+
+  const body = fields.map(([k, v]) => `  ${k} = {${bibtexEscape(v)}}`).join(',\n')
+  return '@' + type + '{' + key + ',\n' + body + '\n}\n'
+}
+
 const STYLES = {
   apa: { label: 'APA 7th', format: apa },
   gb: { label: 'GB/T 7714-2015', format: gb },
   mla: { label: 'MLA 9th', format: mla },
   chicago: { label: 'Chicago 17th', format: chicago },
+  bibtex: { label: 'BibTeX', format: bibtex },
 }
 
 /**
@@ -173,6 +224,9 @@ const STYLES = {
 export function cite(record, opts = {}) {
   const style = STYLES[opts.style] ?? STYLES.apa
   const mode = opts.mode ?? 'reference'
+
+  // BibTeX has no in-text / direct-quote semantics — it is always a reference.
+  if (opts.style === 'bibtex') return style.format(record)
 
   if (mode === 'intext') {
     if (opts.style === 'gb') {

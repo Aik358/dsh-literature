@@ -10,7 +10,7 @@
 const React = require('react')
 const h = React.createElement
 
-const { NS, zh, en, t, setLocale, detectLocale } = require('./i18n.cjs')
+const { NS, zh, en, t, setHostLocale, detectLocale } = require('./i18n.cjs')
 const { ensureStyle, removeStyle } = require('./style.cjs')
 const store = require('./store.cjs')
 const { Panel, SidebarButton, LibraryTab } = require('./panel.cjs')
@@ -133,7 +133,9 @@ function apply(ctx) {
     return
   }
 
-  const syncLocale = () => setLocale(detectLocale(ctx) || 'zh')
+  // The host language is only an *input*. When the user has pinned a language
+  // on the settings page, that preference wins over whatever the host reports.
+  const syncLocale = () => setHostLocale(detectLocale(ctx))
   syncLocale()
   ctx.on('locale/change', syncLocale)
 

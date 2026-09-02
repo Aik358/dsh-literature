@@ -1,4 +1,5 @@
 const React = require('react')
+const { t } = require('../i18n.cjs')
 
 /**
  * pdf.js wrapper. The library is required lazily so its (large) module body
@@ -92,8 +93,13 @@ async function createViewer(root, options) {
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     const task = lib.getDocument({ url: options.pdfUrl, withCredentials: false, isEvalSupported: false })
     controller.loadingTask = task
+    // A flag rather than matching the rejection message: pdf.js wording varies
+    // by version, and a string match here used to depend on the very Chinese
+    // text it was trying to select.
+    let timedOut = false
     const timer = setTimeout(() => {
       // Abort a wedged load; the rejected promise triggers the retry below.
+      timedOut = true
       task.destroy().catch(() => {})
     }, 30000)
     try {
@@ -103,7 +109,7 @@ async function createViewer(root, options) {
       lastError = e
       clearTimeout(timer)
       if (controller.destroyed || attempt === 2) {
-        throw new Error(lastError?.message?.includes('加载超时') ? 'PDF 加载超时，请重试' : 'PDF 加载失败，请重试')
+        throw new Error(t(timedOut ? 'error.pdfLoadTimeout' : 'error.pdfLoadFailed'))
       }
       // Brief backoff before the retry so the first attempt's sockets drain.
       await new Promise((r) => setTimeout(r, 400))
@@ -177,7 +183,7 @@ async function createViewer(root, options) {
         controller.rendered.delete(pageNum)
         return
       }
-      pageEl.textContent = `页面 ${pageNum} 渲染失败: ${e?.message ?? e}`
+      pageEl.textContent = t('error.pdfRenderFailed', { page: pageNum, message: e?.message ?? e })
     }
   }
 
@@ -338,6 +344,26 @@ async function createViewer(root, options) {
       }
     }
   }
+
+  // -- thumbnails (5.11) ---------------------------------------------------
+  // Low-scale re-render of a single page into a small canvas. Sequential
+  // calls keep memory bounded; a destroyed viewer stops immediately.
+  const THUMB_LIMIT = 50
+  controller.renderThumb = async (pageNum, canvas) => {
+    if (controller.destroyed || !canvas) return null
+    try {
+      const page = await controller.doc.getPage(pageNum)
+      const vp = page.getViewport({ scale: 0.25 })
+      canvas.width = Math.max(1, Math.floor(vp.width))
+      canvas.height = Math.max(1, Math.floor(vp.height))
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise
+      return vp.height
+    } catch (e) {
+      if (e?.name === 'RenderingCancelledException') return null
+      return null
+    }
+  }
+  controller.thumbLimit = () => THUMB_LIMIT
 
   // -- annotations ---------------------------------------------------------
   function drawAnnotations(pageNum, pageEl) {

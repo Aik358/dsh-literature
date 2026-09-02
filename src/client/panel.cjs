@@ -4,10 +4,11 @@ const ReactDOM = require('react-dom')
 const { useState, useEffect, useRef, useSyncExternalStore, useCallback } = React
 
 const store = require('./store.cjs')
-const { t } = require('./i18n.cjs')
-const { Icon, Spinner, Badge, Button, IconButton, EmptyState, ProgressBar, Dropdown, copyText } = require('./ui.cjs')
+const { t, localizeError } = require('./i18n.cjs')
+const { Icon, Spinner, Badge, Button, IconButton, EmptyState, ProgressBar, Dropdown, ContextMenu, copyText, downloadText } = require('./ui.cjs')
 const { api } = require('./api.cjs')
 const { createViewer, COLORS } = require('./pdf/viewer.cjs')
+const { renderMiniMd } = require('./md.cjs')
 const { SettingsPage } = require('./settings.cjs')
 const { ConflictDiff } = require('./diff.cjs')
 
@@ -35,7 +36,8 @@ function metaLine(item) {
   const authors = item.record?.authors ?? item.authors ?? []
   if (authors.length) {
     const names = authors.map((a) => [a.lastName, a.firstName].filter(Boolean).join(' ')).filter(Boolean)
-    parts.push(names.length > 3 ? `${names.slice(0, 3).join('、')} 等` : names.join('、'))
+    const sep = t('authors.join')
+    parts.push(names.length > 3 ? t('authors.etAl', { names: names.slice(0, 3).join(sep) }) : names.join(sep))
   }
   const year = item.record?.year ?? item.year
   if (year) parts.push(String(year))
@@ -60,13 +62,13 @@ function citeMenuFor(item) {
     try {
       const { text } = await store.citeItem(item.key, opts)
       await copyText(text)
-      store.flash(`${label} 已复制`)
+      store.flash(t('action.copied', { label }))
     } catch (e) {
-      store.flash(e.message)
+      store.flash(localizeError(e))
     }
   }
   const promptPages = (style, label) => {
-    const pages = window.prompt('页码（如 12-15）', '12')
+    const pages = window.prompt(t('reader.pagesPrompt'), '12')
     if (pages) run({ style, mode: 'direct', pages }, label)
   }
   return [
@@ -80,6 +82,8 @@ function citeMenuFor(item) {
     { divider: true },
     { label: t('cite.direct'), hint: 'APA', onClick: () => promptPages('apa', t('cite.direct')) },
     { label: t('cite.direct'), hint: 'GB/T', onClick: () => promptPages('gb', t('cite.direct')) },
+    { divider: true },
+    { label: t('cite.bibtex'), hint: 'JabRef / Overleaf', onClick: () => run({ style: 'bibtex', mode: 'reference' }, 'BibTeX') },
   ]
 }
 
@@ -97,11 +101,11 @@ function searchMenuFor(item) {
   ].filter(Boolean)
 }
 
-function ItemCard({ item }) {
+function ItemCard({ item, selectMode, selected, onToggleSelect, onContextMenu }) {
   const busy = store.isBusy(item.key)
   const task = store.getSnapshot().tasks[item.key]
   const stateStr = String(item.state ?? '')
-  const error = item.error?.message ?? (stateStr.endsWith('_failed') ? t('state.' + stateStr) : '')
+  const error = localizeError(item.error) ?? (stateStr.endsWith('_failed') ? t('state.' + stateStr) : '')
   const tone = STATE_TONE[item.state] ?? 'info'
 
   const actions = []
@@ -171,6 +175,21 @@ function ItemCard({ item }) {
     )
   }
 
+  // 5.8: tag chips on the card (add via prompt, remove per-chip).
+  const cardTags = Array.isArray(item.tags) ? item.tags : []
+  const addTag = () => {
+    const input = window.prompt(t('list.tagAdd'))
+    const tag = (input ?? '').trim().replace(/[,，]/g, '')
+    if (!tag) return
+    if (cardTags.includes(tag)) return
+    store.setItemTags(item.key, [...cardTags, tag])
+  }
+  const removeTag = (tag) => {
+    store.setItemTags(item.key, cardTags.filter((x) => x !== tag))
+    // Keep the list-level tag filter honest when its tag disappears.
+    if (store.getSnapshot().tagFilter === tag) store.setTagFilter('')
+  }
+
   const title = item.record?.title || item.title || item.display || item.rawValue || 'Untitled'
 
   const savedBadge =
@@ -193,9 +212,21 @@ function ItemCard({ item }) {
         if (e.target.closest('button, input, select, textarea, a')) return
         if (item.pdf?.path) store.selectItem(item.key, 'reader')
       },
+      // 5.10: right-click opens the citation menu directly on the card.
+      onContextMenu: (e) => {
+        if (!item.record) return
+        e.preventDefault()
+        e.stopPropagation()
+        onContextMenu?.(e)
+      },
     },
     h('div', { className: 'zt-row', style: { justifyContent: 'space-between', marginBottom: 4 } },
       h('div', { className: 'zt-row', style: { minWidth: 0 } },
+        selectMode
+          ? h('label', { className: 'zt-check', title: t('list.selectMode') },
+              h('input', { type: 'checkbox', checked: !!selected, onChange: () => onToggleSelect?.() }),
+            )
+          : null,
         stateStr ? h(Badge, { tone }, t('state.' + stateStr)) : null,
         item.state === 'duplicate' ? h(Badge, { tone: 'warn' }, t('state.duplicate')) : null,
       ),
@@ -203,6 +234,22 @@ function ItemCard({ item }) {
     ),
     h('h4', { className: 'zt-card-title' }, title),
     h('p', { className: 'zt-card-meta' }, metaLine(item)),
+    cardTags.length || selectMode
+      ? h('div', { className: 'zt-tags' },
+          ...cardTags.map((tag) =>
+            h('span', { key: tag, className: 'zt-tag' },
+              h('span', { className: 'zt-tag-label' }, tag),
+              h('button', {
+                type: 'button',
+                className: 'zt-tag-x',
+                title: t('list.tagRemove'),
+                onClick: () => removeTag(tag),
+              }, 'x'),
+            ),
+          ),
+          h('button', { type: 'button', className: 'zt-tag-add', title: t('list.tagAdd'), onClick: addTag }, '+'),
+        )
+      : null,
     h('div', { className: 'zt-card-id' }, identifierLine(item)),
     task ? h(ProgressBar, { value: task.progress }) : null,
     error ? h('div', { className: 'zt-error' }, error) : null,
@@ -251,6 +298,7 @@ function CandidateList() {
 function ItemList() {
   const state = useStore()
   const [dragging, setDragging] = useState(false)
+  const [ctxMenu, setCtxMenu] = useState(null)
   const dragCounter = useRef(0)
 
   const onDragOver = (e) => {
@@ -278,7 +326,7 @@ function ItemList() {
       store
         .dropPdf(f)
         .then(() => store.flash(`${t('dropOk')} ${f.name}`))
-        .catch((err) => store.flash(err.message))
+        .catch((err) => store.flash(localizeError(err)))
     }
   }
 
@@ -291,7 +339,107 @@ function ItemList() {
   if (state.items.length === 0) {
     return h('div', listProps, h(EmptyState, { key: 'empty' }))
   }
-  return h('div', listProps, ...state.items.map((item) => h(ItemCard, { key: item.key, item })))
+
+  const selectMode = state.selectMode === true
+  const selection = state.selection ?? []
+  const exportItems = [
+    { label: 'RIS', onClick: () => store.exportSelected('ris') },
+    { label: 'BibTeX', onClick: () => store.exportSelected('bibtex') },
+    { label: 'CSL-JSON', onClick: () => store.exportSelected('csl-json') },
+  ]
+
+  // 5.8 filtering (status + tag) and 5.9 sorting — all pure front-end.
+  const statusFilter = state.statusFilter ?? 'all'
+  const tagFilter = state.tagFilter ?? ''
+  const allTags = [...new Set(state.items.flatMap((i) => (Array.isArray(i.tags) ? i.tags : [])))].sort((a, b) => a.localeCompare(b, 'zh'))
+  const statusChips = [
+    { v: 'all', label: t('filter.all') },
+    { v: 'pending', label: t('filter.pending') },
+    { v: 'saved', label: t('filter.saved') },
+    { v: 'failed', label: t('filter.failed') },
+  ]
+  const matches = (it) => {
+    if (statusFilter === 'saved' && it.state !== 'saved') return false
+    if (statusFilter === 'failed' && !String(it.state ?? '').endsWith('_failed')) return false
+    if (statusFilter === 'pending' && (it.state === 'saved' || String(it.state ?? '').endsWith('_failed'))) return false
+    if (tagFilter && !(Array.isArray(it.tags) ? it.tags : []).includes(tagFilter)) return false
+    return true
+  }
+  const sortBy = state.sortBy ?? 'created'
+  const sorted = state.items.filter(matches).slice().sort((a, b) => {
+    if (sortBy === 'title') {
+      const ta = a.record?.title || a.title || ''
+      const tb = b.record?.title || b.title || ''
+      return ta.localeCompare(tb, 'zh') || (b.createdAt ?? 0) - (a.createdAt ?? 0)
+    }
+    if (sortBy === 'year') {
+      const ya = a.record?.year ?? a.year ?? 0
+      const yb = b.record?.year ?? b.year ?? 0
+      return yb - ya || (b.createdAt ?? 0) - (a.createdAt ?? 0)
+    }
+    return (b.createdAt ?? 0) - (a.createdAt ?? 0)
+  })
+  const sortItems = [
+    { label: t('filter.sortCreated'), hint: sortBy === 'created' ? '\u2713' : undefined, onClick: () => store.setSortBy('created') },
+    { label: t('filter.sortTitle'), hint: sortBy === 'title' ? '\u2713' : undefined, onClick: () => store.setSortBy('title') },
+    { label: t('filter.sortYear'), hint: sortBy === 'year' ? '\u2713' : undefined, onClick: () => store.setSortBy('year') },
+  ]
+
+  return h('div', { className: 'zt-listwrap' },
+    h('div', { className: 'zt-filterbar' },
+      ...statusChips.map((c) =>
+        h('button', {
+          key: c.v,
+          type: 'button',
+          className: 'zt-chip' + (statusFilter === c.v ? ' zt-chip-on' : ''),
+          onClick: () => store.setStatusFilter(c.v),
+        }, c.label),
+      ),
+      h('span', { style: { flex: 1 } }),
+      h(Dropdown, {
+        align: 'right',
+        trigger: (setOpen, open) => h(IconButton, { title: t('filter.tag'), onClick: () => setOpen(!open) }, h(Icon.Tag, { size: 15 })),
+        items: [
+          { label: t('filter.all'), hint: !tagFilter ? '\u2713' : undefined, onClick: () => store.setTagFilter('') },
+          ...allTags.map((tag) => ({ label: '#' + tag, hint: tagFilter === tag ? '\u2713' : undefined, onClick: () => store.setTagFilter(tag) })),
+        ],
+      }),
+      h(Dropdown, {
+        align: 'right',
+        trigger: (setOpen, open) => h(IconButton, { title: t('filter.sort'), onClick: () => setOpen(!open) }, h(Icon.Sort, { size: 15 })),
+        items: sortItems,
+      }),
+    ),
+    h('div', { className: 'zt-listbar' },
+      h('span', { style: { flex: 1 } }),
+      h(Button, { variant: 'ghost', onClick: () => store.toggleSelectMode() }, t('list.selectMode')),
+    ),
+    sorted.length
+      ? h('div', listProps, ...sorted.map((item) =>
+          h(ItemCard, {
+            key: item.key,
+            item,
+            selectMode,
+            selected: selection.includes(item.key),
+            onToggleSelect: () => store.toggleSelect(item.key),
+            onContextMenu: (e) => setCtxMenu({ x: e.clientX, y: e.clientY, item }),
+          }),
+        ))
+      : h('div', listProps, h('div', { className: 'zt-hint', style: { padding: '8px 2px' } }, t('filter.empty'))),
+    selectMode
+      ? h('div', { className: 'zt-selectbar' },
+          h('span', { className: 'zt-hint', style: { flex: 1, minWidth: 0 } }, `${t('list.selectedPrefix')} ${selection.length}`),
+          h(Button, { onClick: () => store.selectAllItems() }, t('list.selectAll')),
+          h(Button, { variant: 'ghost', onClick: () => store.clearSelection() }, t('list.clear')),
+          h(Dropdown, {
+            align: 'right',
+            trigger: (setOpen, open) => h(Button, { onClick: () => setOpen(!open), disabled: !selection.length }, t('list.exportTitle')),
+            items: exportItems,
+          }),
+        )
+      : null,
+    ctxMenu ? h(ContextMenu, { key: 'ctx', x: ctxMenu.x, y: ctxMenu.y, items: citeMenuFor(ctxMenu.item), onClose: () => setCtxMenu(null) }) : null,
+  )
 }
 
 function SearchBar() {
@@ -323,17 +471,17 @@ function SearchBar() {
       }
       try {
         const r = await store.scanDir(state.config.importDir)
-        store.flash(`${t('importDir')}：新增 ${r.imported?.length ?? 0} 条`)
+        store.flash(t('action.importedCount', { name: t('importDir'), count: r.imported?.length ?? 0 }))
       } catch (e) {
-        store.flash(e.message)
+        store.flash(localizeError(e))
       }
     }
     const runZotero = async () => {
       try {
         const r = await store.importZotero(50)
-        store.flash(`${t('importZotero')}：新增 ${r.count ?? 0} 条`)
+        store.flash(t('action.importedCount', { name: t('importZotero'), count: r.count ?? 0 }))
       } catch (e) {
-        store.flash(e.message)
+        store.flash(localizeError(e))
       }
     }
     return [
@@ -457,6 +605,13 @@ function Reader({ item }) {
   const [aiOpen, setAiOpen] = useState(false)
   const [aiQ, setAiQ] = useState('')
   const [aiBusy, setAiBusy] = useState(false)
+  const pageRef = useRef(1)
+  const searchInputRef = useRef(null)
+  const thumbsRef = useRef(null)
+  const [thumbsOpen, setThumbsOpen] = useState(false)
+  // Reader position memory (5.1): throttled save while scrolling, guaranteed
+  // flush on unmount. ratio = scrollTop / (scrollHeight - clientHeight).
+  const progressRef = useRef({ pageIndex: 0, ratio: 0, lastAt: 0 })
 
   const pdfUrl = item.pdf?.path ? api.pdfUrl(item.key) : item.zotero?.key ? api.zoteroPdfUrl(item.zotero.key) : null
 
@@ -470,19 +625,21 @@ function Reader({ item }) {
       setAiOpen(false)
       setAiQ('')
     } catch (e) {
-      store.flash(e.message)
+      store.flash(localizeError(e))
     } finally {
       setAiBusy(false)
     }
   }
-  const highlightSelection = () => {
+  const highlightSelection = (color) => {
     if (!selMenu || !ctrlRef.current) return
     const ctrl = ctrlRef.current
     const annotation = ctrl.addHighlight({
       pageIndex: selMenu.pageIndex,
       rects: selMenu.rects,
       text: selMenu.text,
-      color: COLORS[(annotations.length + 1) % COLORS.length],
+      // 5.3: the user picks the color (colour palette in the selection bar);
+      // COLORS[0] is the fallback default, no auto-rotation anymore.
+      color: color ?? COLORS[0],
       note: '',
     })
     // addHighlight already emits 'annotation', which the handler below uses
@@ -494,6 +651,25 @@ function Reader({ item }) {
     ctrlRef.current?.removeHighlight(id)
     api.removeAnnotation(item.key, id).catch(() => {})
     setHlMenu(null)
+  }
+
+  // 5.1 reading-position memory: write {pageIndex, ratio} to the item at most
+  // every 2s while scrolling, always once on unmount. The write is best-effort
+  // (failure changes nothing user-visible); the next open restores the spot.
+  const saveProgress = (force) => {
+    const ctrl = ctrlRef.current
+    const el = scrollRef.current
+    if (!ctrl || !el || !el.scrollHeight) return
+    const denom = el.scrollHeight - el.clientHeight
+    const ratio = denom > 0 ? el.scrollTop / denom : 0
+    const pageIndex = Math.max(0, ctrl.currentPage() - 1)
+    const st = progressRef.current
+    const now = Date.now()
+    if (!force && now - st.lastAt < 2000 && st.pageIndex === pageIndex && Math.abs(st.ratio - ratio) < 0.01) return
+    st.lastAt = now
+    st.pageIndex = pageIndex
+    st.ratio = ratio
+    api.patchItem(item.key, { readerProgress: { pageIndex, ratio: Math.round(ratio * 1000) / 1000 } }).catch(() => {})
   }
 
   useEffect(() => {
@@ -524,6 +700,27 @@ function Reader({ item }) {
           setScale(s)
           setMode(ctrl.getMode())
         })
+        // 5.1 restore: relayout sets every page's height before emitting
+        // 'scale', so that is the earliest safe moment to reapply the saved
+        // scroll position (a raw ratio would target zero-height pages).
+        const progress = item.readerProgress
+        if (progress) {
+          let restored = false
+          const restore = () => {
+            if (restored || disposed || !ctrlRef.current) return
+            const el = scrollRef.current
+            if (!el) return
+            restored = true
+            const denom = el.scrollHeight - el.clientHeight
+            if (denom > 0 && typeof progress.ratio === 'number' && progress.ratio > 0) {
+              el.scrollTop = progress.ratio * denom
+            } else if (typeof progress.pageIndex === 'number' && progress.pageIndex > 0) {
+              ctrl.goToPage(progress.pageIndex + 1)
+            }
+          }
+          ctrl.on('scale', () => setTimeout(restore, 0))
+          setTimeout(restore, 600)
+        }
         ctrl.on('annotation', (annotation) => {
           // Keep the on-screen note list in sync immediately; the server write
           // is best-effort (the shadow store persists it).
@@ -546,6 +743,9 @@ function Reader({ item }) {
 
     return () => {
       disposed = true
+      // 5.1: last chance to persist the reading position before the viewer
+      // (and its scroll container) is torn down.
+      saveProgress(true)
       ctrl?.destroy()
       ctrlRef.current = null
       setSelMenu(null)
@@ -555,8 +755,25 @@ function Reader({ item }) {
 
   const updatePage = useCallback(() => {
     if (!ctrlRef.current) return
-    setPage(ctrlRef.current.currentPage())
+    const n = ctrlRef.current.currentPage()
+    pageRef.current = n
+    setPage(n)
   }, [])
+
+  // 5.6: export the reader's highlights + notes as a Markdown file.
+  const exportNotes = async () => {
+    try {
+      const { markdown, count } = await api.exportNotes(item.key)
+      if (!count) {
+        store.flash(t('reader.noNotes'))
+        return
+      }
+      const stem = (item.title || item.key || 'notes').replace(/[^\w\u4e00-\u9fa5-]+/g, '_').slice(0, 60)
+      downloadText(`${stem}.md`, markdown, 'text/markdown;charset=utf-8')
+    } catch (e) {
+      store.flash(localizeError(e))
+    }
+  }
 
   const doSearch = async () => {
     const q = searchQ.trim()
@@ -580,6 +797,61 @@ function Reader({ item }) {
     doSearch()
   }
 
+  // 5.2 keyboard shortcuts: arrows page, +/- zoom, / focuses search,
+  // Esc dismisses the floating bars / search pane. Typing into any input is
+  // never hijacked (search box, AI ask box, host chat).
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      const t = e.target
+      const typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || (typeof t.isContentEditable === 'boolean' && t.isContentEditable))
+      if (typing) return
+      const ctrl = ctrlRef.current
+      const n = pageRef.current
+      switch (e.key) {
+        case 'ArrowLeft':
+          if (!ctrl) return
+          e.preventDefault()
+          ctrl.goToPage(Math.max(1, n - 1))
+          break
+        case 'ArrowRight':
+          if (!ctrl) return
+          e.preventDefault()
+          ctrl.goToPage(Math.min(ctrl.numPages(), n + 1))
+          break
+        case '+':
+        case '=':
+          if (!ctrl) return
+          e.preventDefault()
+          ctrl.setScale(1.2)
+          break
+        case '-':
+        case '_':
+          if (!ctrl) return
+          e.preventDefault()
+          ctrl.setScale(1 / 1.2)
+          break
+        case '/':
+          e.preventDefault()
+          setSearchOpen(true)
+          setSearchQ('')
+          setMatches([])
+          setTimeout(() => searchInputRef.current?.focus(), 0)
+          break
+        case 'Escape':
+          setSelMenu(null)
+          setHlMenu(null)
+          setSearchOpen(false)
+          setAiOpen(false)
+          break
+        default:
+          return
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [])
+
   const toggleToc = () => {
     if (!tocOpen && !outline.length) {
       store.flash(t('reader.noOutline'))
@@ -587,6 +859,50 @@ function Reader({ item }) {
     }
     setTocOpen((v) => !v)
   }
+
+  // 5.11 thumbnail sidebar: small canvases at 0.25 scale, one click to jump.
+  // Capped at 50 pages — beyond that, per-page renders would stall big PDFs.
+  const toggleThumbs = () => {
+    const ctrl = ctrlRef.current
+    if (!ctrl) return
+    if (!thumbsOpen && ctrl.numPages() > (ctrl.thumbLimit?.() ?? 50)) {
+      store.flash(t('reader.thumbsTooMany'))
+      return
+    }
+    setThumbsOpen((v) => !v)
+  }
+  useEffect(() => {
+    if (!thumbsOpen || !ctrlRef.current || !thumbsRef.current) return undefined
+    const ctrl = ctrlRef.current
+    const total = ctrl.numPages()
+    const host = thumbsRef.current
+    host.textContent = ''
+    const cells = []
+    for (let i = 1; i <= total; i += 1) {
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = 'zt-thumb'
+      btn.title = 'p.' + i
+      const canvas = document.createElement('canvas')
+      btn.appendChild(canvas)
+      const label = document.createElement('span')
+      label.textContent = String(i)
+      btn.appendChild(label)
+      btn.addEventListener('click', () => ctrl.goToPage(i))
+      host.appendChild(btn)
+      cells.push([canvas, i])
+    }
+    let cancelled = false
+    ;(async () => {
+      for (const [canvas, i] of cells) {
+        if (cancelled || !ctrlRef.current) return
+        await ctrl.renderThumb(i, canvas)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [thumbsOpen])
 
   // Clicking anywhere that is not the floating bars dismisses them; the bars
   // themselves stop propagation so their buttons survive the click.
@@ -608,7 +924,7 @@ function Reader({ item }) {
   const clampBar = (pt) => {
     if (!pt) return null
     const M = 8
-    const w = 300
+    const w = 360
     const hgt = 44
     return {
       left: Math.max(M, Math.min((pt.x ?? 0) - w / 2, Math.max(M, window.innerWidth - w - M))),
@@ -624,7 +940,23 @@ function Reader({ item }) {
           h('button', { type: 'button', className: 'zt-ai-float-btn', onClick: () => runAi({ action: 'translate', selection: selMenu.text }) }, t('ai.translate')),
           h('button', { type: 'button', className: 'zt-ai-float-btn', onClick: () => runAi({ action: 'explain', selection: selMenu.text }) }, t('ai.explain')),
           h('button', { type: 'button', className: 'zt-ai-float-btn', onClick: () => runAi({ action: 'summarize', selection: selMenu.text }) }, t('ai.summarize')),
-          h('button', { type: 'button', className: 'zt-ai-float-btn zt-ai-float-btn-accent', onClick: highlightSelection }, t('ai.highlight')),
+          // 5.3: user picks the highlight colour instead of an auto-rotation.
+          h('span', { className: 'zt-color-group', title: t('ai.highlight') },
+            ...COLORS.map((c) =>
+              h('button', {
+                key: c,
+                type: 'button',
+                className: 'zt-color-dot',
+                'data-color': c,
+                title: c,
+                'aria-label': t('ai.highlight') + ' ' + c,
+                onClick: (e) => {
+                  e.stopPropagation()
+                  highlightSelection(c)
+                },
+              }),
+            ),
+          ),
         ),
         document.body,
       )
@@ -660,7 +992,7 @@ function Reader({ item }) {
 
   return h(
     'div',
-    { className: 'zt-reader', onMouseDown: dismissFloaters },
+    { className: 'zt-reader', 'data-night-mode': store.getSnapshot().config?.nightMode ?? 'auto', onMouseDown: dismissFloaters },
     h(
       'div',
       { className: 'zt-toolbar' },
@@ -675,7 +1007,9 @@ function Reader({ item }) {
       h('span', { style: { fontSize: 12, color: 'var(--dsw-alias-label-tertiary, #8a8a8a)' } }, `${Math.round(scale * 100)}%`),
       h(IconButton, { title: t('reader.zoomIn'), onClick: () => ctrlRef.current?.setScale(1.2) }, h(Icon.Plus, { size: 16 })),
       h(IconButton, { title: t('reader.toc'), onClick: toggleToc }, h(Icon.Toc, { size: 16 })),
+      h(IconButton, { title: t('reader.thumbs'), onClick: toggleThumbs }, h(Icon.Thumb, { size: 16 })),
       h(IconButton, { title: t('reader.search'), onClick: toggleSearch }, h(Icon.Search, { size: 16 })),
+      h(IconButton, { title: t('reader.exportNotes'), onClick: exportNotes }, h(Icon.Download, { size: 16 })),
     ),
     tocOpen && outline.length
       ? h(
@@ -690,7 +1024,7 @@ function Reader({ item }) {
           ),
         )
       : null,
-    tocOpen && !outline.length ? h('div', { className: 'zt-toc' }, h('div', { className: 'zt-hint' }, '（无目录）')) : null,
+    tocOpen && !outline.length ? h('div', { className: 'zt-toc' }, h('div', { className: 'zt-hint' }, t('reader.noOutline'))) : null,
     searchOpen
       ? h(
           'div',
@@ -698,6 +1032,7 @@ function Reader({ item }) {
           h('div', { className: 'zt-row' },
             h('input', {
               className: 'zt-input',
+              ref: searchInputRef,
               autoFocus: true,
               placeholder: t('reader.search'),
               value: searchQ,
@@ -712,14 +1047,17 @@ function Reader({ item }) {
           matches.length
             ? matches.slice(0, 20).map((m, i) => h('button', { key: i, onClick: () => ctrlRef.current?.goToPage(m.page) }, `p.${m.page}  ${m.preview}`))
             : searchQ
-              ? h('div', { className: 'zt-hint' }, '0 结果')
+              ? h('div', { className: 'zt-hint' }, t('reader.noResults'))
               : null,
         )
       : null,
     aiPanel,
     error ? h('div', { className: 'zt-error', style: { padding: 16 } }, error) : null,
     !ready && !error ? h('div', { className: 'zt-empty' }, h(Spinner, { size: 20 }), h('p', null, t('reader.loading'))) : null,
-    h('div', { className: 'zt-reader-scroll', ref: scrollRef, onScroll: (e) => { updatePage(); setSelMenu(null); setHlMenu(null) } }),
+    h('div', { className: 'zt-reader-main' },
+      thumbsOpen ? h('div', { className: 'zt-thumbs', ref: thumbsRef }) : null,
+      h('div', { className: 'zt-reader-scroll', ref: scrollRef, onScroll: (e) => { updatePage(); saveProgress(false); setSelMenu(null); setHlMenu(null) } }),
+    ),
     // selectionBar / highlightBar are React portals (see above) — their DOM
     // lives on <body> as position:fixed, so nothing renders at these spots.
     selectionBar,
@@ -730,7 +1068,15 @@ function Reader({ item }) {
           { className: 'zt-toc', style: { maxHeight: '25%' } },
           h('div', { style: { fontSize: 12, fontWeight: 500, color: 'var(--dsw-alias-label-secondary, #666)', padding: '0 8px 4px' } }, `${t('reader.notes')} (${annotations.length})`),
           ...annotations.map((a) =>
-            h('button', { key: a.id, onClick: () => ctrlRef.current?.goToPage(a.pageIndex + 1) }, `p.${a.pageIndex + 1}  ${a.text.slice(0, 60)}${a.note ? ' · ' + a.note : ''}`),
+            h('button', { key: a.id, onClick: () => ctrlRef.current?.goToPage(a.pageIndex + 1) },
+              h('span', null, `p.${a.pageIndex + 1}  ${a.text.slice(0, 60)}`),
+              a.note
+                ? h('span', {
+                    className: 'zt-note-md',
+                    dangerouslySetInnerHTML: { __html: renderMiniMd(a.note.length > 80 ? a.note.slice(0, 80) + '…' : a.note) },
+                  })
+                : null,
+            ),
           ),
         )
       : null,
@@ -817,7 +1163,7 @@ function Panel({ onClose, embedded = false }) {
       await store.saveConfig({ saveMode: 'builtin' })
       store.flash(t('banner.switched'))
     } catch (e) {
-      store.flash(e.message)
+      store.flash(localizeError(e))
     }
   }
 

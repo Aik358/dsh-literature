@@ -2,6 +2,7 @@ import { writeFile, mkdir } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { loadConfig } from './config.js'
 import { pdfFileName } from './zotero/naming.js'
+import { bibtex } from './cite.js'
 
 /**
  * Fallback save channel: drop the PDF plus a metadata sidecar into a plain
@@ -10,7 +11,7 @@ import { pdfFileName } from './zotero/naming.js'
  * re-importable — CSL-JSON for Zotero, RIS for everything else.
  */
 
-function cslJson(record) {
+function cslJsonOne(record) {
   const authors = (record.authors ?? []).map((a) => ({
     family: a.lastName ?? '',
     given: a.firstName ?? '',
@@ -26,26 +27,28 @@ function cslJson(record) {
     dataset: 'dataset',
   }[record.itemType] ?? 'article-journal'
 
-  return [
-    {
-      id: record.doi || record.arxiv || record.title || 'item',
-      type,
-      title: record.title ?? '',
-      author: authors,
-      issued: record.year ? { 'date-parts': [[record.year]] } : undefined,
-      'container-title': record.container || undefined,
-      publisher: record.publisher || undefined,
-      volume: record.volume || undefined,
-      issue: record.issue || undefined,
-      page: record.pages || undefined,
-      DOI: record.doi || undefined,
-      ISBN: record.isbn || undefined,
-      ISSN: record.issn || undefined,
-      abstract: record.abstract || undefined,
-      URL: record.url || undefined,
-      note: record.arxiv ? `arXiv:${record.arxiv}` : undefined,
-    },
-  ]
+  return {
+    id: record.doi || record.arxiv || record.title || 'item',
+    type,
+    title: record.title ?? '',
+    author: authors,
+    issued: record.year ? { 'date-parts': [[record.year]] } : undefined,
+    'container-title': record.container || undefined,
+    publisher: record.publisher || undefined,
+    volume: record.volume || undefined,
+    issue: record.issue || undefined,
+    page: record.pages || undefined,
+    DOI: record.doi || undefined,
+    ISBN: record.isbn || undefined,
+    ISSN: record.issn || undefined,
+    abstract: record.abstract || undefined,
+    URL: record.url || undefined,
+    note: record.arxiv ? `arXiv:${record.arxiv}` : undefined,
+  }
+}
+
+function cslJson(record) {
+  return [cslJsonOne(record)]
 }
 
 function risLine(tag, value) {
@@ -113,4 +116,30 @@ export async function exportToDirectory(record, pdfBuffer) {
   if (wantRis) await writeFile(safePaths[i++], ris(record), 'utf8')
 
   return { dir, pdfPath: safePaths[0], jsonPath: jsonPath ? safePaths[wantCsl ? 1 : 0] : null, risPath: risPath ? safePaths[safePaths.length - 1] : null }
+}
+
+/**
+ * Multi-item export as one payload. RIS/BibTeX concatenate per-entry blocks;
+ * CSL-JSON becomes a single JSON array (what Zotero/other tools import).
+ */
+export function batch(format, records) {
+  const list = records ?? []
+  if (format === 'ris') return list.map(ris).join('')
+  if (format === 'bibtex') return (list.map(bibtex).join('\n') + (list.length ? '\n' : ''))
+  if (format === 'csl-json') return JSON.stringify(list.map(cslJsonOne), null, 2)
+  throw Object.assign(new Error('不支持的导出格式: ' + format), { code: 'bad_format' })
+}
+
+/** Reader highlights + notes as Markdown (## p.N + > quote + note block). */
+export function notesMarkdown(title, annotations) {
+  const sorted = [...(annotations ?? [])].sort((a, b) => (a.pageIndex ?? 0) - (b.pageIndex ?? 0))
+  const parts = []
+  if (title) parts.push('# ' + title)
+  for (const a of sorted) {
+    const page = (a.pageIndex ?? 0) + 1
+    parts.push('', '## p.' + page)
+    if (a.text) parts.push('> ' + a.text)
+    if (a.note) parts.push('', a.note)
+  }
+  return parts.join('\n').replace(/^\n+/, '')
 }

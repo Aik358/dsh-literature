@@ -51,12 +51,17 @@ const DEFAULTS = {
   /** Panel geometry defaults (the client keeps live geometry in localStorage). */
   panelWidth: 380,
   readerFit: 'fit-width',
+  /** Reader night mode: 'auto' follows the host dark theme, 'on'/'off' force it. */
+  nightMode: 'auto',
   /** Entry placement: 'auto' (better-sidebar tab when available, else footer),
    *  'footer' (always the sidebar footer button), 'hide' (settings page only). */
   entryMode: 'auto',
   /** Watched folder: new PDFs here are auto-imported into the built-in library. */
   importDir: '',
   watchImport: false,
+  /** UI language: 'auto' follows the host runtime, 'zh' / 'en' pin it. Stored
+   *  with the rest of the config so the choice survives a host switch. */
+  uiLanguage: 'auto',
   /** User-configured custom download sources (mirrors / institutional proxies).
    *  Each: { id, label, urlTemplate, headers?, enabled, order }. URL templates
    *  may use {doi} {arxiv} {isbn} {title} {url}. These are the user's own

@@ -14,6 +14,29 @@ const zh = {
     placeholder: '粘贴一段包含 DOI / arXiv ID / 标题的文本…',
     add: '识别',
   },
+  /**
+   * Server-side failures arrive as `e.message`, which would otherwise leak
+   * Chinese strings into an English UI. Errors carrying a `code` are mapped
+   * through this table by localizeError(); anything else falls through to the
+   * raw message.
+   */
+  error: {
+    timeout: '请求超时，请重试',
+    uploadTimeout: '上传超时，请重试',
+    invalidKey: '无效的条目标识',
+    missingKey: '缺少条目标识',
+    pdfNotDownloaded: '全文尚未下载',
+    methodNotAllowed: '请求方法不被允许',
+    forbidden: '仅允许本机访问',
+    notFound: '找不到请求的资源',
+    itemNotFound: '找不到该条目',
+    noSelection: '没有选择要导出的条目',
+    noMetadata: '所选条目缺少元数据，无法导出',
+    noMetadataCite: '条目缺少元数据，无法生成引用',
+    pdfLoadTimeout: 'PDF 加载超时，请重试',
+    pdfLoadFailed: 'PDF 加载失败，请重试',
+    pdfRenderFailed: '第 {page} 页渲染失败：{message}',
+  },
   state: {
     discovered: '待解析',
     resolving: '解析元数据…',
@@ -34,6 +57,7 @@ const zh = {
     dir: '目录',
     mode: { builtin: '内置库', zotero: '本地库', dir: '目录' },
   },
+  authors: { join: '、', etAl: '{names} 等' },
   action: {
     download: '下载全文',
     retry: '重试',
@@ -56,6 +80,9 @@ const zh = {
     importPdfHint: '在浏览器登录并下载 PDF 后，从这里选择文件导入',
     launch: '启动文献库',
     saveAnyway: '仍然保存',
+    sourcePlaceholder: '校内镜像',
+    copied: '已复制 {label}',
+    importedCount: '{name}：新增 {count} 条',
   },
   banner: {
     zoteroDown: '文献库未运行——保存到文献库会失败，可改用内置文献库',
@@ -83,9 +110,20 @@ const zh = {
     notDownloaded: '全文尚未下载',
     addNote: '添加笔记',
     deleteAnnotation: '删除',
+    exportNotes: '导出全部高亮与笔记',
+    noNotes: '还没有高亮或笔记',
+    thumbs: '页面缩略图',
+    thumbsTooMany: 'PDF 超过 50 页，暂不支持缩略图',
+    noResults: '没有匹配结果',
+    pagesPrompt: '页码（如 12-15）',
+    promptHint: '页码（如 12）',
   },
   settings: {
     title: '文献侧窗设置',
+    sectionLanguage: '语言',
+    uiLanguage: '界面语言',
+    uiLanguageHint: '“跟随宿主”会随 DeepSeek 客户端的语言自动切换',
+    lang: { auto: '跟随宿主', zh: '简体中文', en: 'English' },
     sectionSave: '保存与导出',
     sectionDetect: '识别与下载',
     sectionBehavior: '行为与界面',
@@ -140,6 +178,10 @@ const zh = {
     entryFooter: '固定为左侧栏按钮',
     entryHide: '隐藏（仅从设置页访问）',
     readerFit: '阅读器默认缩放',
+    nightMode: '夜读模式',
+    nightAuto: '自动（跟随暗色主题）',
+    nightOn: '始终开启',
+    nightOff: '关闭',
     fitWidth: '适应宽度',
     fitPage: '适应页面',
     zoteroPort: '文献库端口',
@@ -154,6 +196,9 @@ const zh = {
     title: '库中已有相似条目',
     subtitle: '字段差异如下，选择处理方式：',
     noDiff: '字段完全一致',
+    colField: '字段',
+    colInLibrary: '库中',
+    colIncoming: '新条目',
     notSupported: '连接接口只支持新增，不支持更新/覆盖；如需覆盖请在文献库中手动处理',
   },
   cite: {
@@ -161,6 +206,7 @@ const zh = {
     reference: '参考文献',
     intext: '文内引用',
     direct: '直接引用（输入页码）',
+    bibtex: 'BibTeX 条目',
   },
   search: {
     title: '全网搜索',
@@ -185,6 +231,29 @@ const zh = {
   importZoteroHint: '需要文献库应用运行',
   importZoteroDown: '文献库未运行',
   status: { ready: '就绪', running: '文献库运行中', down: '文献库未运行' },
+  list: {
+    selectMode: '选择',
+    selectAll: '全选',
+    clear: '取消选择',
+    selectedPrefix: '已选',
+    exportTitle: '导出',
+    noSelection: '先勾选要导出的条目',
+    exported: '已导出：',
+    tagAdd: '添加标签（回车确认）',
+    tagRemove: '删除标签',
+  },
+  filter: {
+    all: '全部',
+    pending: '未入库',
+    saved: '已入库',
+    failed: '失败',
+    tag: '标签',
+    sort: '排序',
+    sortCreated: '按添加时间',
+    sortTitle: '按标题',
+    sortYear: '按年份',
+    empty: '没有符合条件的条目',
+  },
   ai: {
     ask: '问 AI',
     askHint: '对当前文献提问，AI 会基于全文回答（发送到当前对话）',
@@ -220,6 +289,23 @@ const en = {
     placeholder: 'Paste text containing a DOI / arXiv ID / title…',
     add: 'Detect',
   },
+  error: {
+    timeout: 'Request timed out — please retry',
+    uploadTimeout: 'Upload timed out — please retry',
+    invalidKey: 'Invalid item key',
+    missingKey: 'Missing item key',
+    pdfNotDownloaded: 'Full text has not been downloaded yet',
+    methodNotAllowed: 'Method not allowed',
+    forbidden: 'Loopback connections only',
+    notFound: 'Resource not found',
+    itemNotFound: 'Item not found',
+    noSelection: 'Select at least one item to export',
+    noMetadata: 'The selected items lack metadata and cannot be exported',
+    noMetadataCite: 'This item lacks metadata, so no citation can be built',
+    pdfLoadTimeout: 'PDF loading timed out — please retry',
+    pdfLoadFailed: 'Could not load the PDF — please retry',
+    pdfRenderFailed: 'Failed to render page {page}: {message}',
+  },
   state: {
     discovered: 'Pending',
     resolving: 'Resolving metadata…',
@@ -240,6 +326,7 @@ const en = {
     dir: 'Folder',
     mode: { builtin: 'Built-in', zotero: 'Library', dir: 'Folder' },
   },
+  authors: { join: ', ', etAl: '{names} et al.' },
   action: {
     download: 'Download PDF',
     retry: 'Retry',
@@ -262,6 +349,9 @@ const en = {
     importPdfHint: 'After signing in and downloading the PDF in your browser, pick the file here',
     launch: 'Launch library',
     saveAnyway: 'Save anyway',
+    sourcePlaceholder: 'Campus mirror',
+    copied: 'Copied {label}',
+    importedCount: '{name}: {count} new',
   },
   banner: {
     zoteroDown: 'Library is not running — saving to it will fail; you can switch to the built-in library',
@@ -289,9 +379,20 @@ const en = {
     notDownloaded: 'Full text not downloaded yet',
     addNote: 'Add note',
     deleteAnnotation: 'Delete',
+    exportNotes: 'Export all highlights & notes',
+    noNotes: 'No highlights or notes yet',
+    thumbs: 'Page thumbnails',
+    thumbsTooMany: 'PDFs over 50 pages do not support thumbnails',
+    noResults: 'No matches',
+    pagesPrompt: 'Pages (e.g. 12-15)',
+    promptHint: 'Page (e.g. 12)',
   },
   settings: {
     title: 'Literature panel settings',
+    sectionLanguage: 'Language',
+    uiLanguage: 'Interface language',
+    uiLanguageHint: '"Follow host" switches with the DeepSeek client language',
+    lang: { auto: 'Follow host', zh: 'Chinese (Simplified)', en: 'English' },
     sectionSave: 'Saving & export',
     sectionDetect: 'Detection & download',
     sectionBehavior: 'Behaviour & UI',
@@ -346,6 +447,10 @@ const en = {
     entryFooter: 'Always the sidebar footer button',
     entryHide: 'Hidden (settings page only)',
     readerFit: 'Reader default fit',
+    nightMode: 'Night reading mode',
+    nightAuto: 'Auto (follow dark theme)',
+    nightOn: 'Always on',
+    nightOff: 'Off',
     fitWidth: 'Fit width',
     fitPage: 'Fit page',
     zoteroPort: 'Library port',
@@ -360,6 +465,9 @@ const en = {
     title: 'A similar entry already exists',
     subtitle: 'Field differences — choose how to proceed:',
     noDiff: 'Fields are identical',
+    colField: 'Field',
+    colInLibrary: 'In library',
+    colIncoming: 'Incoming',
     notSupported: 'The connector API can only create items, not update/overwrite — please handle the overlap in the library app manually',
   },
   cite: {
@@ -367,6 +475,7 @@ const en = {
     reference: 'Reference list',
     intext: 'In-text citation',
     direct: 'Direct quote (with page)',
+    bibtex: 'BibTeX entry',
   },
   search: {
     title: 'Search online',
@@ -391,6 +500,29 @@ const en = {
   importZoteroHint: 'needs the library app running',
   importZoteroDown: 'Library not running',
   status: { ready: 'Ready', running: 'Library running', down: 'Library not running' },
+  list: {
+    selectMode: 'Select',
+    selectAll: 'Select all',
+    clear: 'Clear selection',
+    selectedPrefix: 'Selected',
+    exportTitle: 'Export',
+    noSelection: 'Select items to export first',
+    exported: 'Exported: ',
+    tagAdd: 'Add tag (Enter to confirm)',
+    tagRemove: 'Remove tag',
+  },
+  filter: {
+    all: 'All',
+    pending: 'Not saved',
+    saved: 'Saved',
+    failed: 'Failed',
+    tag: 'Tag',
+    sort: 'Sort',
+    sortCreated: 'By added time',
+    sortTitle: 'By title',
+    sortYear: 'By year',
+    empty: 'No items match the filters',
+  },
   ai: {
     ask: 'Ask AI',
     askHint: 'Ask about this paper — the AI answers from the full text (sent to the current chat)',
@@ -417,7 +549,16 @@ const TABLES = { zh, en }
 let currentLocale = 'zh'
 const listeners = new Set()
 
-/** Reads the host's resolved locale if the runtime exposes one. */
+/** User preference from the settings page: 'auto' | 'zh' | 'en'. */
+let preference = 'auto'
+/** Locale reported by the host runtime (may be null when not exposed). */
+let hostLocale = null
+
+/**
+ * Reads the host's resolved locale if the runtime exposes one. This is only a
+ * *source* — the resolved UI language is decided by resolveLocale(), because an
+ * explicit user preference always wins over the host language.
+ */
 function detectLocale(ctx) {
   try {
     const snap = ctx?.locale?.snapshot?.()
@@ -430,20 +571,27 @@ function detectLocale(ctx) {
   return null
 }
 
-function t(path) {
+function t(path, params) {
   const parts = String(path).split('.')
   let node = TABLES[currentLocale]
   for (const p of parts) {
     node = node?.[p]
     if (node === undefined) break
   }
-  if (node !== undefined && typeof node !== 'object') return node
+  if (node !== undefined && typeof node !== 'object') return interpolate(node, params)
   let fallback = TABLES.zh
   for (const p of parts) {
     fallback = fallback?.[p]
     if (fallback === undefined) break
   }
-  return typeof fallback === 'object' ? '' : String(fallback ?? path)
+  return typeof fallback === 'object' ? '' : interpolate(String(fallback ?? path), params)
+}
+
+/** Replaces {name} placeholders; undefined values are left visible on purpose
+ *  so a missing substitution is obvious in review rather than silently blank. */
+function interpolate(template, params) {
+  if (!params) return template
+  return String(template).replace(/\{(\w+)\}/g, (m, key) => (params[key] != null ? String(params[key]) : m))
 }
 
 function setLocale(locale) {
@@ -458,9 +606,60 @@ function setLocale(locale) {
   }
 }
 
+/** 'auto' follows the host runtime; 'zh' / 'en' pin the language. */
+function setPreference(pref) {
+  preference = TABLES[pref] ? pref : 'auto'
+  setLocale(resolveLocale())
+}
+
+/** Called when the host's own language changes (or on first mount). */
+function setHostLocale(locale) {
+  hostLocale = TABLES[locale] ? locale : null
+  if (preference === 'auto') setLocale(resolveLocale())
+}
+
+function resolveLocale() {
+  if (TABLES[preference]) return preference
+  return hostLocale || 'zh'
+}
+
+function getPreference() {
+  return preference
+}
+
+/**
+ * Translates an error for display. The server sends a stable `code` alongside
+ * its human-readable `error`; when the code is known we render the translated
+ * string, otherwise the raw message is shown so nothing is silently swallowed.
+ */
+function localizeError(err) {
+  if (!err) return ''
+  if (err.code) {
+    const translated = t(`error.${err.code}`)
+    // t() returns the path itself when the key is unknown — treat that as a
+    // miss rather than printing "error.WHATEVER" to the user.
+    if (translated !== `error.${err.code}`) return translated
+  }
+  return err.message ?? String(err)
+}
+
 function subscribe(fn) {
   listeners.add(fn)
   return () => listeners.delete(fn)
 }
 
-module.exports = { NS, zh, en, t, setLocale, subscribe, detectLocale, currentLocale: () => currentLocale }
+module.exports = {
+  NS,
+  zh,
+  en,
+  t,
+  localizeError,
+  setLocale,
+  subscribe,
+  detectLocale,
+  setPreference,
+  setHostLocale,
+  resolveLocale,
+  getPreference,
+  currentLocale: () => currentLocale,
+}

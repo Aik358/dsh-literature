@@ -69,6 +69,9 @@ const Icon = {
     svg([h('path', { d: 'M4 6h16M4 10h16M4 14h10M4 18h7M15 17l2 2 4-4' })], props?.size),
   Sparkle: (props) =>
     svg([h('path', { d: 'M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 15l.9 2.6L22.5 18.5l-2.6.9L19 22l-.9-2.6-2.6-.9 2.6-.9z' })], props?.size),
+  Tag: (props) => svg([h('path', { d: 'M20.6 13.4L11 3.8A2 2 0 009.6 3H5a2 2 0 00-2 2v4.6a2 2 0 00.6 1.4l9.6 9.6a2 2 0 002.8 0l4.6-4.6a2 2 0 000-2.8z' }), h('circle', { cx: 7.5, cy: 7.5, r: 1.2, fill: 'currentColor', stroke: 'none' })], props?.size),
+  Sort: (props) => svg([h('path', { d: 'M11 5h10M11 9h7M11 13h4M3 17l3 3 3-3M6 20V4' })], props?.size),
+  Thumb: (props) => svg([h('rect', { x: 3, y: 3, width: 8, height: 8, rx: 1 }), h('rect', { x: 13, y: 3, width: 8, height: 8, rx: 1 }), h('rect', { x: 3, y: 13, width: 8, height: 8, rx: 1 }), h('rect', { x: 13, y: 13, width: 8, height: 8, rx: 1 })], props?.size),
 }
 
 function Spinner({ size = 16 }) {
@@ -171,6 +174,84 @@ function EmptyState({ onScan }) {
  * small, and its max-height is clamped to the space available on that side —
  * so it scrolls inside the viewport instead of running off it.
  */
+
+/**
+ * Lightweight context menu for right-click actions (5.10). Same placement
+ * discipline as Dropdown: portalled to <body>, measured once mounted, flipped
+ * up when the space below is too small, clamped to the viewport.
+ */
+function ContextMenu({ x, y, items, onClose }) {
+  const menuRef = React.useRef(null)
+  const [pos, setPos] = React.useState(null)
+
+  React.useLayoutEffect(() => {
+    if (typeof x !== 'number' || typeof y !== 'number') return
+    const M = 8
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const menuW = Math.min(300, Math.max(220, vw - M * 2))
+    const realH = menuRef.current?.offsetHeight ?? 0
+    const menuH = realH || Math.min(320, (items?.length ?? 0) * 34 + 8)
+    const below = vh - y - M
+    const above = y - M
+    const up = below < menuH && above > below
+    const maxH = Math.max(120, Math.min(menuH, up ? above : below))
+    const left = Math.max(M, Math.min(x, vw - menuW - M))
+    const top = up ? Math.max(M, y - maxH) : Math.min(y, vh - maxH - M)
+    setPos({ left, top, menuW, maxH })
+  }, [x, y, items])
+
+  React.useEffect(() => {
+    if (typeof x !== 'number' || typeof y !== 'number') return
+    const onDoc = (e) => {
+      if (typeof e.target?.closest === 'function' && e.target.closest('.zt-menu')) return
+      onClose?.()
+    }
+    const onEsc = (e) => {
+      if (e.key === 'Escape') onClose?.()
+    }
+    document.addEventListener('mousedown', onDoc, true)
+    document.addEventListener('keydown', onEsc)
+    return () => {
+      document.removeEventListener('mousedown', onDoc, true)
+      document.removeEventListener('keydown', onEsc)
+    }
+  }, [x, y, onClose])
+
+  if (typeof x !== 'number' || typeof y !== 'number') return null
+  return ReactDOM.createPortal(
+    h(
+      'div',
+      {
+        ref: menuRef,
+        className: 'zt-menu',
+        style: pos ? { left: pos.left, top: pos.top, width: pos.menuW, maxHeight: pos.maxH } : { left: x, top: y, visibility: 'hidden' },
+      },
+      ...(items ?? []).map((it, i) =>
+        it.divider
+          ? h('div', { key: i, className: 'zt-menu-divider' })
+          : h(
+              'button',
+              {
+                key: i,
+                className: 'zt-menu-item',
+                type: 'button',
+                disabled: it.disabled === true,
+                onClick: () => {
+                  onClose?.()
+                  it.onClick?.()
+                },
+              },
+              it.icon ? h('span', { className: 'zt-menu-icon' }, it.icon) : null,
+              h('span', { className: 'zt-menu-label' }, it.label),
+              it.hint ? h('span', { className: 'zt-menu-hint' }, it.hint) : null,
+            ),
+      ),
+    ),
+    document.body,
+  )
+}
+
 function Dropdown({ trigger, items, align = 'left' }) {
   const [open, setOpen] = React.useState(false)
   const [pos, setPos] = React.useState(null)
@@ -298,9 +379,23 @@ async function copyText(text) {
   }
 }
 
+
+/** Downloads a string as a file through a Blob URL. */
+function downloadText(filename, text, mime = 'text/plain;charset=utf-8') {
+  const blob = new Blob([text], { type: mime })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 4000)
+}
+
 function ProgressBar({ value }) {
   const pct = Math.max(0, Math.min(100, value ?? 0))
   return h('div', { className: 'zt-progress' }, h('i', { style: { width: `${pct}%` } }))
 }
 
-module.exports = { Icon, Spinner, Badge, Button, IconButton, EmptyState, ProgressBar, Dropdown, copyText }
+module.exports = { Icon, Spinner, Badge, Button, IconButton, EmptyState, ProgressBar, Dropdown, ContextMenu, copyText, downloadText }

@@ -35,12 +35,13 @@ dsh plugin --profile web add @a9i5k4/dsh-literature
 - **Auto-detection** — parse `DOI` / `arXiv` / `PMID` / `ISBN` / titles from replies or pasted text, deduped
 - **Metadata** — Crossref / arXiv / OpenAlex fill in title, authors, journal, year, abstract
 - **Full-text download** — OA multi-source chain (arXiv → OpenAlex OA → Unpaywall → DOI → publisher link), classified failures with retry; user-configured custom sources
-- **Citation generator** — Scribbr-style: reference list / in-text / direct quote (with page) × APA 7 / GB/T 7714 / MLA 9 / Chicago 17, one-click copy
-- **Library management** — scan an import folder (DOI/arXiv/title inferred from file names), batch-import from a Zotero-ecosystem library, optional folder watch, add/remove entries
-- **Side-panel reader** — built-in PDF viewer: zoom, pages, outline, full-text search, multi-colour highlights and notes
+- **Citation generator** — Scribbr-style: reference list / in-text / direct quote (with page) × APA 7 / GB/T 7714 / MLA 9 / Chicago 17 / **BibTeX**, one-click copy; **right-click** any card for the citation menu
+- **Library management** — scan an import folder (DOI/arXiv/title inferred from file names), batch-import from a Zotero-ecosystem library, optional folder watch, add/remove entries; **tags** and **status filters**, **sorting** (added time / title / year); **multi-select batch export** of RIS / BibTeX / CSL-JSON
+- **Side-panel reader** — built-in PDF viewer: zoom, pages, outline, full-text search, multi-colour highlights and notes (simple **Markdown notes**: bold / italic / inline code); **reading-position memory**, **keyboard shortcuts** (←/→ page, +/- zoom, / search, Esc dismiss), **night reading mode** (follows the dark theme or forced), **thumbnail sidebar** (≤50 pages), **one-click Markdown export** of all highlights & notes
 - **AI assistant** — ChatPDF / SciSpace-style selection actions: **translate / explain / summarize** the selected passage, **ask questions about the full text**, or generate a **paper summary** — answers are steered into your current DeepSeek Harness chat, so you can keep asking follow-ups
 - **Search portals** — every item links to Google Scholar / Baidu Xueshu / CNKI / source page
 - **Conflict preview** — field-level diff against existing entries before saving
+- **Bilingual UI** — switch the interface language between **Follow host** / **简体中文** / **English**; the choice applies immediately with no restart, and server-side notices and error messages follow the active language, so no Chinese text leaks into the English UI
 - **Fully local** — loopback-only routes, no telemetry, no cloud relay, no account
 
 ## 🚀 Quick Start
@@ -62,7 +63,7 @@ Gear icon in the panel header (sections: Saving & export / Detection & download 
 | Retries / timeout | network retry & timeout control | 3 / 30s |
 | Duplicate strategy | ask / keep / replace | ask |
 | Entry placement | auto (right-sidebar tab first) / footer / hidden | auto |
-| Panel width / reader fit | floating size & initial reader view | 380px / fit-width |
+| Panel width / reader fit / night mode | floating size & initial reader view / follow dark theme or force | 380px / fit-width / auto |
 | Import folder / watch | bring local PDFs into the library (manual or every 30s) | empty / off |
 | Custom download sources | your mirrors / proxies / endpoints (with headers) | empty |
 
@@ -79,6 +80,7 @@ The 「Cite」 menu on every card:
 | Reference list | APA 7 / GB/T 7714-2015 / MLA 9 / Chicago 17 entries |
 | In-text | `(Vaswani et al., 2017)` |
 | Direct quote | page prompt → `(Vaswani et al., 2017, p. 7)` |
+| BibTeX | full `@article{...}` entry, ready for JabRef / Overleaf |
 
 ## 🔌 Custom download sources
 

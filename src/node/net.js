@@ -1,6 +1,6 @@
 import { warn } from './log.js'
 
-const UA = 'dsh-literature/0.2.7 (+https://github.com/deepseek-ai/deepseek-harness)'
+const UA = 'dsh-literature/0.3.3 (+https://github.com/deepseek-ai/deepseek-harness)'
 
 export class FetchFailure extends Error {
   constructor(message, { code = 'network', status = 0, retryable = true, cause } = {}) {

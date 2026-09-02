@@ -28,8 +28,10 @@ async function request(path, { method = 'GET', body, signal } = {}) {
       signal: controller.signal,
     })
   } catch (e) {
-    if (e?.name === 'AbortError' && !signal?.aborted) throw new Error('请求超时，请重试')
-    throw new Error(e?.message ?? String(e))
+    // A local timeout is generated here, so it carries its own code; the
+    // display layer translates it (see localizeError).
+    if (e?.name === 'AbortError' && !signal?.aborted) throw httpError('Request timed out', 'timeout')
+    throw httpError(e?.message ?? String(e))
   } finally {
     clearTimeout(timer)
     if (signal) signal.removeEventListener('abort', onAbort)
@@ -41,8 +43,16 @@ async function request(path, { method = 'GET', body, signal } = {}) {
   } catch {
     parsed = {}
   }
-  if (!res.ok) throw new Error(parsed.error || `${method} ${path} -> HTTP ${res.status}`)
+  // Attach the server's stable code so the message can be translated instead
+  // of being shown verbatim (which would leak Chinese into an English UI).
+  if (!res.ok) throw httpError(parsed.error || `${method} ${path} -> HTTP ${res.status}`, parsed.code)
   return parsed
+}
+
+function httpError(message, code) {
+  const err = new Error(message)
+  if (code) err.code = code
+  return err
 }
 
 const api = {
@@ -56,6 +66,13 @@ const api = {
   retry: (key) => request('/retry', { method: 'POST', body: { key } }),
   diff: (key) => request('/diff', { method: 'POST', body: { key } }),
   discard: (key) => request('/discard', { method: 'POST', body: { key } }),
+  /** Partial update of an item (reader progress, tags, ...). */
+  patchItem: (key, patch) => request(`/item/${encodeURIComponent(key)}`, { method: 'PATCH', body: { patch } }),
+  /** Markdown export of a reader's highlights + notes. */
+  exportNotes: (key) => request(`/export-notes/${encodeURIComponent(key)}`),
+  /** Multi-item export (ris | bibtex | csl-json) as one file payload. */
+  exportBatch: (keys, format) => request('/export-batch', { method: 'POST', body: { keys, format } }),
+
   cite: (key, opts = {}) => request('/cite', { method: 'POST', body: { key, ...opts } }),
   scanDir: (dir) => request('/scan-dir', { method: 'POST', body: { dir } }),
   importZotero: (limit = 50) => request('/import-zotero', { method: 'POST', body: { limit } }),
@@ -73,7 +90,7 @@ const api = {
         signal: controller.signal,
       })
     } catch (e) {
-      if (e?.name === 'AbortError') throw new Error('上传超时，请重试')
+      if (e?.name === 'AbortError') throw httpError('Upload timed out', 'uploadTimeout')
       throw e
     } finally {
       clearTimeout(timer)
@@ -85,7 +102,7 @@ const api = {
     } catch {
       parsed = {}
     }
-    if (!res.ok) throw new Error(parsed.error || `drop -> HTTP ${res.status}`)
+    if (!res.ok) throw httpError(parsed.error || `drop -> HTTP ${res.status}`, parsed.code)
     return parsed
   },
   /** Uploads a locally-downloaded PDF for a paywalled / needs-login entry. */
@@ -101,7 +118,7 @@ const api = {
         signal: controller.signal,
       })
     } catch (e) {
-      if (e?.name === 'AbortError') throw new Error('上传超时，请重试')
+      if (e?.name === 'AbortError') throw httpError('Upload timed out', 'uploadTimeout')
       throw e
     } finally {
       clearTimeout(timer)
@@ -113,7 +130,7 @@ const api = {
     } catch {
       parsed = {}
     }
-    if (!res.ok) throw new Error(parsed.error || `import -> HTTP ${res.status}`)
+    if (!res.ok) throw httpError(parsed.error || `import -> HTTP ${res.status}`, parsed.code)
     return parsed
   },
   zoteroCollections: () => request('/zotero/collections?selected=1'),

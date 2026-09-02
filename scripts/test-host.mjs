@@ -389,6 +389,110 @@ const handler = prefix.handler
   check('discarding an item removes its annotations (no orphan leak)', Array.isArray(after.annotations) && after.annotations.length === 0, after.annotations)
 }
 
+// 12b. item PATCH route: reader progress + tags persist per item.
+//     The entry is created through the BUNDLE route (drop) so it lives in the
+//     same store graph the PATCH handler reads (src and bundle keep separate
+//     in-memory stores, see section 17).
+{
+  const pdf = Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(160, 81)])
+  const dropRes = makeRes()
+  const dropReq = makeReq('POST', '/api/dsh-literature/drop?filename=patch%20target.pdf', '127.0.0.1', pdf)
+  const dp = collect(dropRes)
+  await handler(dropReq, dropRes)
+  const dropBody = JSON.parse(await dp)
+  const rawKey = dropBody.item?.key
+  check('12b setup: drop created the patch entry', !!rawKey, dropBody.error)
+
+  const res = makeRes()
+  const req = makeReq('PATCH', `/api/dsh-literature/item/${encodeURIComponent(rawKey)}`, '127.0.0.1',
+    Buffer.from(JSON.stringify({ patch: { readerProgress: { pageIndex: 4, ratio: 0.42 }, tags: ['methods', 'nlp'] } })))
+  const p = collect(res)
+  await handler(req, res)
+  const body = JSON.parse(await p)
+  check('item PATCH stores readerProgress', res.status === 200 && body.item?.readerProgress?.pageIndex === 4 && body.item?.readerProgress?.ratio === 0.42, body.item?.readerProgress)
+  check('item PATCH stores tags', Array.isArray(body.item?.tags) && body.item.tags.length === 2, body.item?.tags)
+
+  // Round-trip through the store (state route lists the same item).
+  const stateRes = makeRes()
+  const sreq = makeReq('GET', '/api/dsh-literature/state')
+  const sp = collect(stateRes)
+  await handler(sreq, stateRes)
+  const { items } = JSON.parse(await sp)
+  const found = items.find((i) => i.key === rawKey)
+  check('item PATCH persists across reads', found?.readerProgress?.pageIndex === 4 && (found?.tags ?? []).includes('methods'), found?.readerProgress)
+
+  // Unknown key -> 404.
+  const missRes = makeRes()
+  const missReq = makeReq('PATCH', '/api/dsh-literature/item/nope', '127.0.0.1',
+    Buffer.from(JSON.stringify({ patch: { readerProgress: { pageIndex: 1, ratio: 0 } } })))
+  const mp = collect(missRes)
+  await handler(missReq, missRes)
+  await mp
+  check('item PATCH on missing key is 404', missRes.status === 404, missRes.status)
+}
+
+// 12c. export-notes + export-batch routes (5.6 / 5.7)
+{
+  // Entry created through the bundle route so the bundle store owns it.
+  const pdf = Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(150, 82)])
+  const dropRes = makeRes()
+  const dropReq = makeReq('POST', '/api/dsh-literature/drop?filename=export%20me.pdf', '127.0.0.1', pdf)
+  const dp = collect(dropRes)
+  await handler(dropReq, dropRes)
+  const dropBody = JSON.parse(await dp)
+  const key = dropBody.item?.key
+  check('12c setup: drop created the export entry', !!key, dropBody.error)
+
+  // Seed two annotations (out of page order) through the bundle route.
+  const ann1 = { text: 'attention focus', note: 'core idea', pageIndex: 2, rects: [] }
+  const ann2 = { text: 'second quote', note: '', pageIndex: 0, rects: [] }
+  for (const a of [ann1, ann2]) {
+    const ar = makeRes()
+    const aq = makeReq('POST', `/api/dsh-literature/annotations/${encodeURIComponent(key)}`, '127.0.0.1', Buffer.from(JSON.stringify(a)))
+    const ap = collect(ar)
+    await handler(aq, ar)
+    await ap
+  }
+
+  const enRes = makeRes()
+  const enReq = makeReq('GET', `/api/dsh-literature/export-notes/${encodeURIComponent(key)}`)
+  const ep = collect(enRes)
+  await handler(enReq, enRes)
+  const enBody = JSON.parse(await ep)
+  check('export-notes returns markdown with p.3 + quote + note',
+    enRes.status === 200 && enBody.count === 2 && enBody.markdown.includes('## p.3') && enBody.markdown.includes('> attention focus') && enBody.markdown.includes('core idea'),
+    { status: enRes.status, count: enBody.count, md: (enBody.markdown ?? '').slice(0, 120) })
+  check('export-notes sorts pages ascending', enBody.markdown.indexOf('## p.1') < enBody.markdown.indexOf('## p.3'), enBody.markdown)
+
+  const ebRes = makeRes()
+  const ebReq = makeReq('POST', '/api/dsh-literature/export-batch', '127.0.0.1',
+    Buffer.from(JSON.stringify({ keys: [key], format: 'ris' })))
+  const bp = collect(ebRes)
+  await handler(ebReq, ebRes)
+  const ebBody = JSON.parse(await bp)
+  check('export-batch returns RIS with a TY block', ebRes.status === 200 && ebBody.count === 1 && ebBody.text.includes('TY  - '), { status: ebRes.status, text: (ebBody.text ?? '').slice(0, 40) })
+
+  const badRes = makeRes()
+  const badReq = makeReq('POST', '/api/dsh-literature/export-batch', '127.0.0.1',
+    Buffer.from(JSON.stringify({ keys: [], format: 'ris' })))
+  const badp = collect(badRes)
+  await handler(badReq, badRes)
+  await badp
+  check('export-batch with no keys is 400', badRes.status === 400, badRes.status)
+
+  // Pure-function batch: 3 records -> 3 RIS blocks (deterministic, no network).
+  const { batch, notesMarkdown } = await import('../src/node/exporter.js')
+  const rec = (title) => ({ itemType: 'journalArticle', title, authors: [{ lastName: 'X', firstName: 'Y' }], year: 2020 })
+  const three = batch('ris', [rec('A'), rec('B'), rec('C')])
+  check('batch ris joins 3 blocks', (three.match(/TY  - /g) ?? []).length === 3, three)
+  const b2 = batch('bibtex', [rec('A')])
+  check('batch bibtex joins entries', b2.includes('@article{'), b2.slice(0, 30))
+  const csl = JSON.parse(batch('csl-json', [rec('A'), rec('B')]))
+  check('batch csl-json is an array of 2', Array.isArray(csl) && csl.length === 2 && csl[0].type === 'article-journal', csl)
+  const md = notesMarkdown('Paper', [{ pageIndex: 1, text: 'q1', note: 'n1' }, { pageIndex: 0, text: 'q0' }])
+  check('notesMarkdown headings and blockquote', md.startsWith('# Paper') && md.includes('## p.1') && md.includes('> q1') && md.includes('n1'), md)
+}
+
 // 13. custom source templates reject templates whose variables are missing
 {
   const { renderSourceTemplate } = await import('../src/node/fetch/pdf.js')
@@ -419,6 +523,30 @@ const handler = prefix.handler
   // toIsbn10/toIsbn13 are private; verify through fetchByIsbn's sibling logic
   // by checking normalize of an entry missing a title -> null.
   check('openlibrary normalize rejects empty entries', normalizeOpenLibrary(null) === null)
+}
+
+// 14b. BibTeX output (5.5): entry shape + cite() forces reference mode
+{
+  const { cite, bibtex } = await import('../src/node/cite.js')
+  const record = {
+    itemType: 'journalArticle',
+    title: 'Attention Is All You Need',
+    authors: [{ lastName: 'Vaswani', firstName: 'A' }, { lastName: 'Shazeer', firstName: 'N' }],
+    year: 2017,
+    container: 'NeurIPS',
+    volume: '30',
+    issue: '1',
+    pages: '5998-6008',
+    doi: '10.5555/3295222.3295349',
+  }
+  const text = bibtex(record)
+  check('bibtex starts with an article key', /^@article\{Vaswani2017Attention,[\s\S]*\}$/.test(text.trim()), text.slice(0, 60))
+  check('bibtex contains author/title/year fields', text.includes('author = {Vaswani, A and Shazeer, N}') && text.includes('title = {Attention Is All You Need}') && /year = \{2017\}/.test(text), text)
+  check('bibtex maps container to journal for articles', /journal = \{NeurIPS\}/.test(text), text)
+  check('bibtex escapes specials', bibtex({ ...record, title: 'A & B: 100%_test' }).includes('title = {A \\& B: 100\\%\\_test}'), bibtex({ ...record, title: 'A & B: 100%_test' }).split('\n')[2])
+  const forced = cite(record, { style: 'bibtex', mode: 'direct', pages: '10' })
+  check('cite() forces reference for bibtex (no page suffix)', forced.includes('@article') && !forced.includes('p. 10'), forced.slice(0, 40))
+  check('bibtex book mapping', bibtex({ ...record, itemType: 'bookSection', container: 'Some Book' }).includes('@inbook'), 'inbook')
 }
 
 // 15. ISBN resolve path end-to-end (live API; may be offline in sandbox)
