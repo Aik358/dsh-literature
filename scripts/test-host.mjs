@@ -554,6 +554,11 @@ const handler = prefix.handler
 //      them into real segments/HTML the dialog can render. Also guards two
 //      style rules: APA 7 italicises the VOLUME, and Chicago 17 uses italics
 //      (not quotes) for the journal name — the old code nested quotes there.
+//
+// 14d. Author-name conventions (each style has its own, none shared):
+//      APA initials+dot, & before last, 21+ → 19…last; MLA inverted-first,
+//      et al. at 3+; Chicago 'and' before last, 11+ → first 7 + et al.;
+//      GB 'Last First' with 等 at 4+.
 {
   const { cite, citeDetailed, toSegments, stripItalic, segmentsToHtml } = await import('../src/node/cite.js')
   const record = {
@@ -567,7 +572,58 @@ const handler = prefix.handler
     pages: '107-121',
     doi: '10.18653/v1/N18-1202',
   }
+  const four = {
+    ...record,
+    authors: [
+      { lastName: 'Peters', firstName: 'Matthew' },
+      { lastName: 'Neumann', firstName: 'Mark' },
+      { lastName: 'Iyyer', firstName: 'Mohit' },
+      { lastName: 'Zettlemoyer', firstName: 'Luke' },
+    ],
+  }
 
+  // --- APA author format
+  const apa4 = cite(four, { style: 'apa', mode: 'reference' })
+  check('apa initials carry dots (full names abbreviated)', apa4.includes('Peters, M., Neumann, M., Iyyer, M., & Zettlemoyer, L.'), apa4)
+  check('apa no double period before (year)', apa4.includes('& Zettlemoyer, L. (2018).'), apa4)
+  check('apa one author has no &', !cite(record, { style: 'apa' }).includes('&'), cite(record, { style: 'apa' }))
+  const apa21 = citeDetailed({ ...record, authors: Array.from({ length: 21 }, (_, i) => ({ lastName: `Author${i + 1}`, firstName: 'X' })) }, { style: 'apa' })
+  check('apa 21+ authors → 19 + ellipsis + last', apa21.text.includes('Author19, X., … Author21, X.'), apa21.text.slice(0, 200))
+
+  // --- CJK names stay whole (no inversion, no initials) in APA and GB
+  const cjkRecord = { ...four, title: '基于稳态视觉诱发电位的脑机接口研究', authors: [
+    { lastName: '张', firstName: '三' }, { lastName: '李', firstName: '四' }, { lastName: '王', firstName: '五' },
+  ] }
+  const apaCjk = cite(cjkRecord, { style: 'apa' })
+  check('apa keeps CJK names whole', apaCjk.includes('张三, 李四, & 王五 (2018).'), apaCjk)
+  const gbCjk = cite(cjkRecord, { style: 'gb' })
+  check('gb keeps CJK names whole', gbCjk.includes('张三, 李四, 王五.'), gbCjk)
+
+  // --- MLA author format
+  const mla4 = cite(four, { style: 'mla', mode: 'reference' })
+  check('mla 3+ authors → first inverted + et al.', mla4.startsWith('Peters, Matthew, et al. "'), mla4)
+  const mla2 = cite({ ...four, authors: four.authors.slice(0, 2) }, { style: 'mla' })
+  check('mla 2 authors → inverted first, upright second with and', mla2.startsWith('Peters, Matthew, and Mark Neumann. "'), mla2)
+
+  // --- Chicago author format
+  const chi4 = cite(four, { style: 'chicago', mode: 'reference' })
+  check('chicago inverted first, and before last', chi4.startsWith('Peters, Matthew, Mark Neumann, Mohit Iyyer, and Luke Zettlemoyer. "'), chi4)
+  const chi11 = citeDetailed({ ...record, authors: Array.from({ length: 11 }, (_, i) => ({ lastName: `Name${i + 1}`, firstName: 'Y' })) }, { style: 'chicago' })
+  check('chicago 11+ authors → first 7 + et al.', chi11.text.startsWith('Name1, Y, Name2, Y, Name3, Y, Name4, Y, Name5, Y, Name6, Y, Name7, Y, et al.'), chi11.text.slice(0, 160))
+
+  // --- GB author format (no commas, no initials dots, 等 at 4+)
+  const gb4 = cite(four, { style: 'gb', mode: 'reference' })
+  check('gb lists first three then 等', gb4.includes('Peters M, Neumann M, Iyyer M, 等'), gb4)
+  const gb2 = cite({ ...four, authors: four.authors.slice(0, 2) }, { style: 'gb' })
+  check('gb two authors listed fully', gb2.includes('Peters M, Neumann M.'), gb2)
+
+  // --- in-text author format (APA et al. at 3+)
+  const intext4 = cite(four, { style: 'apa', mode: 'intext' })
+  check('apa in-text 4 authors → et al.', intext4 === '(Peters et al., 2018)', intext4)
+  const intext2 = cite({ ...four, authors: four.authors.slice(0, 2) }, { style: 'apa', mode: 'intext' })
+  check('apa in-text 2 authors → A & B', intext2 === '(Peters & Neumann, 2018)', intext2)
+
+  // --- italics (from 0.2.9, kept as regression guard)
   const apa = citeDetailed(record, { style: 'apa', mode: 'reference' })
   check('cite text carries no literal asterisks', !apa.text.includes('*'), apa.text)
   check('apa italicises journal name', apa.segments.some((s) => s.italic && s.text === 'Transactions of the ACL'), JSON.stringify(apa.segments))

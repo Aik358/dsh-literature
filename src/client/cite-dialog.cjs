@@ -9,9 +9,15 @@
  * The italics arrive as `segments` (the server marks them with `*…*` and then
  * splits them), NOT as raw HTML injection — nothing from the record is ever
  * passed through dangerouslySetInnerHTML here.
+ *
+ * Rendered through a PORTAL on document.body (T3): the panel root carries a
+ * transform (drag positioning), and a transformed ancestor turns position:fixed
+ * into "fixed to that ancestor" — the backdrop would be trapped inside the
+ * panel's stacking context and clipped by its overflow, i.e. invisible.
  */
 
 const React = require('react')
+const ReactDOM = require('react-dom')
 const h = React.createElement
 const { useState, useEffect, useRef, useCallback } = React
 
@@ -99,7 +105,9 @@ function CitationDialog({ item, onClose }) {
 
   const title = item.record?.title ?? item.title ?? item.display ?? ''
 
-  return h(
+  // Portal to <body>: escape the panel's transform/overflow (see file header).
+  return ReactDOM.createPortal(
+    h(
     'div',
     {
       className: 'zt-modal-backdrop',
@@ -197,6 +205,8 @@ function CitationDialog({ item, onClose }) {
         h(Button, { variant: 'primary', onClick: () => doCopy(true), disabled: loading || !!error, title: t('cite.copyRichHint') }, t('cite.copyRich')),
       ),
     ),
+    ),
+    document.body,
   )
 }
 

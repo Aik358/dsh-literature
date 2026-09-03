@@ -11,13 +11,69 @@
 const JOURNAL_TYPES = new Set(['journalArticle', 'preprint', 'conferencePaper'])
 const BOOK_TYPES = new Set(['book', 'bookSection', 'report', 'thesis'])
 
-function authorsList(record, { max = 99, ellipsis = ', et al.' } = {}) {
+/**
+ * Author-name helpers, one per style — the name conventions are NOT shared:
+ *
+ * - APA 7:  `Last, F. M.` with INITIALS + dot ('Xiang' → 'X.'); all authors up
+ *   to 20 joined by ',' with '&' before the last; 21+ → first 19, '…', last.
+ * - MLA 9:  first author inverted (`Last, First`), everyone else upright;
+ *   2 authors get 'and', 3+ collapse to 'et al.' after the first.
+ * - Chicago 17 (bibliography): first inverted, rest upright, 'and' before the
+ *   last; 1–10 all listed, 11+ → first 7 + 'et al.'.
+ * - GB/T 7714: `Last First` (no comma, no dots) — handled inside gb().
+ *
+ * firstName is used verbatim except in APA, where initials are mandated.
+ */
+
+function apaInitials(firstName) {
+  const s = String(firstName ?? '').trim()
+  if (!s) return ''
+  return s.charAt(0).toUpperCase() + '.'
+}
+
+const CJK = /[\u4e00-\u9fff]/
+
+function apaAuthors(record) {
   const list = record.authors ?? []
   if (!list.length) return ''
-  const names = list.map((a) => [a.lastName, a.firstName].filter(Boolean).join(', '))
-  if (names.length === 1) return names[0]
-  if (names.length <= max) return names.slice(0, -1).join(', ') + ', & ' + names[names.length - 1]
-  return names.slice(0, max).join(', ') + ellipsis
+  // CJK names are NOT inverted or initialised (APA 7 keeps them whole, e.g.
+  // `张三`); the comma/inverted form is only for Western names.
+  const name = (a) => {
+    if (CJK.test(a.lastName ?? '') || CJK.test(a.firstName ?? '')) return `${a.lastName ?? ''}${a.firstName ?? ''}`
+    return [a.lastName, apaInitials(a.firstName)].filter(Boolean).join(', ')
+  }
+  if (list.length === 1) return name(list[0])
+  if (list.length <= 20) {
+    const names = list.map(name)
+    return names.slice(0, -1).join(', ') + ', & ' + names[names.length - 1]
+  }
+  return list.slice(0, 19).map(name).join(', ') + ', … ' + name(list[list.length - 1])
+}
+
+function mlaAuthors(record) {
+  const list = record.authors ?? []
+  if (!list.length) return ''
+  const inverted = (a) => [a.lastName, a.firstName].filter(Boolean).join(', ')
+  const upright = (a) => [a.firstName, a.lastName].filter(Boolean).join(' ')
+  if (list.length === 1) return inverted(list[0])
+  if (list.length === 2) return inverted(list[0]) + ', and ' + upright(list[1])
+  // No trailing dot: mla() appends the sentence period itself — 'et al.' plus
+  // that would produce 'et al..' in the output.
+  return inverted(list[0]) + ', et al'
+}
+
+function chicagoAuthors(record) {
+  const list = record.authors ?? []
+  if (!list.length) return ''
+  const inverted = (a) => [a.lastName, a.firstName].filter(Boolean).join(', ')
+  const upright = (a) => [a.firstName, a.lastName].filter(Boolean).join(' ')
+  if (list.length === 1) return inverted(list[0])
+  if (list.length === 2) return inverted(list[0]) + ', and ' + upright(list[1])
+  if (list.length <= 10) {
+    const parts = [inverted(list[0]), ...list.slice(1, -1).map(upright)]
+    return parts.join(', ') + ', and ' + upright(list[list.length - 1])
+  }
+  return list.slice(0, 7).map(inverted).join(', ') + ', et al'
 }
 
 function authorsShort(record) {
@@ -43,8 +99,10 @@ function doiUrl(record) {
 
 /** APA 7th edition. */
 function apa(record) {
-  const authors = authorsList(record, { max: 20 })
-  const who = authors ? `${authors}. ` : ''
+  // Every rendered name already ends in its initial's dot (Western) or is a
+  // whole CJK name — adding another sentence period here produced `W.. (2023)`.
+  const authors = apaAuthors(record)
+  const who = authors ? `${authors} ` : ''
   const year = `(${yearStr(record)}). `
   const title = (record.title ?? 'Untitled').trim()
 
@@ -87,10 +145,18 @@ function apa(record) {
 /** GB/T 7714-2015 (numeric / 顺序编码制). */
 function gb(record) {
   const list = record.authors ?? []
+  // Western names abbreviate to the first initial WITHOUT a dot (`Peters M`);
+  // Chinese names keep both characters joined with no space (`张三`).
+  const cjk = (s) => /[\u4e00-\u9fff]/.test(s ?? '')
+  const gbName = (a) => {
+    if (cjk(a.lastName) || cjk(a.firstName)) return `${a.lastName ?? ''}${a.firstName ?? ''}`
+    const ini = String(a.firstName ?? '').trim()
+    return [a.lastName, ini ? ini.charAt(0).toUpperCase() : ''].filter(Boolean).join(' ')
+  }
   let who
   if (!list.length) who = ''
-  else if (list.length <= 3) who = list.map((a) => `${a.lastName}${a.firstName ? ' ' + a.firstName : ''}`).join(', ')
-  else who = `${list.slice(0, 3).map((a) => `${a.lastName}${a.firstName ? ' ' + a.firstName : ''}`).join(', ')}, 等`
+  else if (list.length <= 3) who = list.map(gbName).join(', ')
+  else who = `${list.slice(0, 3).map(gbName).join(', ')}, 等`
   const whoPart = who ? `${who}. ` : ''
   const title = (record.title ?? '').trim()
   const year = yearStr(record)
@@ -126,8 +192,8 @@ function gb(record) {
 
 /** MLA 9th edition. */
 function mla(record) {
-  const list = record.authors ?? []
-  const who = list.length ? list.map((a) => `${a.lastName}, ${a.firstName ?? ''}`.trim()).join(', ') + '. ' : ''
+  const who0 = mlaAuthors(record)
+  const who = who0 ? who0 + '. ' : ''
   const title = (record.title ?? 'Untitled').trim()
   if (record.itemType === 'journalArticle' || record.itemType === 'preprint') {
     const journal = record.container ? ` *${record.container}*, ` : ''
@@ -147,8 +213,8 @@ function mla(record) {
 
 /** Chicago 17th (notes-bibliography, bibliography form). */
 function chicago(record) {
-  const list = record.authors ?? []
-  const who = list.length ? list.map((a) => `${a.firstName ?? ''} ${a.lastName ?? ''}`.trim()).join(', ') + '. ' : ''
+  const who0 = chicagoAuthors(record)
+  const who = who0 ? who0 + '. ' : ''
   const title = (record.title ?? 'Untitled').trim()
   if (record.itemType === 'journalArticle' || record.itemType === 'preprint') {
     // Chicago 17 bibliography: the ARTICLE title takes quotes, the JOURNAL
@@ -310,7 +376,7 @@ function authorsShortGb(record) {
   if (!list.length) return '佚名'
   if (list.length === 1) return list[0].lastName
   if (list.length === 2) return `${list[0].lastName}、${list[1].lastName}`
-  return `${list[0].lastName}等`
+  return `${list[0].lastName} 等`
 }
 
 export function listStyles() {
