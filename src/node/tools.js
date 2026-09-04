@@ -3,6 +3,7 @@ import * as store from './store/db.js'
 import { searchItems } from './store/search.js'
 import { shortLabel } from './metadata/normalize.js'
 import { log, warn } from './log.js'
+import { recordCite, recordQuery, recordNote as recordNoteSignal, recordTopic } from './profile.js'
 import { writeFile, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -29,7 +30,7 @@ function textResult(value) {
  * literature-flavoured message, then retire after an idle timeout.
  */
 function toolDefs() {
-  return [lookupTool(), searchTool(), getTool(), citeTool(), noteTool(), statusTool(), saveTool(), figureTool(), deepreadTool()]
+  return [lookupTool(), searchTool(), getTool(), citeTool(), noteTool(), statusTool(), saveTool(), figureTool(), deepreadTool(), profileTool()]
 }
 
 export function registerTools(ctx) {
@@ -129,6 +130,7 @@ function searchTool() {
     async execute(args) {
       const query = String(args?.query ?? '').trim()
       if (!query) return '缺少检索词。'
+      recordQuery(query).catch(() => {})
       const limit = Math.max(1, Math.min(Number(args?.limit) || 8, 20))
       const items = await store.listItems()
       const hits = searchItems(items, query, { limit })
@@ -206,6 +208,7 @@ function citeTool() {
       const item = await store.getItem(key)
       if (!item?.record) return `条目 ${key} 缺少元数据，无法生成引用。请先用 literature_lookup 解析元数据。`
       const { citeDetailed } = await import('./cite.js')
+      recordCite(args?.style ?? 'apa').catch(() => {})
       const d = citeDetailed(item.record, {
         style: args?.style ?? 'apa',
         mode: args?.mode ?? 'reference',
@@ -243,6 +246,7 @@ function noteTool() {
       if (notes.some((n) => (typeof n === 'string' ? n : n.text) === note)) return '该笔记已存在，未重复写入。'
       const entry = { text: note, at: new Date().toISOString() }
       await store.patchItem(key, { notes: [...notes, entry] })
+      recordNoteSignal(key, note).catch(() => {})
       return `已记录到条目 ${key}（共 ${notes.length + 1} 条笔记）。`
     },
   }
@@ -446,9 +450,69 @@ function deepreadTool() {
       for (const m of text.matchAll(/(?:Fig(?:ure)?|表|Table)\s*\d+[.:：][^\n]{5,90}/g)) {
         if (figures.length < 12) figures.push(m[0].trim())
       }
+      recordTopic(title, key).catch(() => {})
       const { buildReadPackage } = await import('./courseware/reading-modes.js')
       const pack = buildReadPackage(mode, { title, text, figures })
       return pack + `\n\n— 解读完成后：literature_note(key, 以【${mode === 'pass1' ? '速读卡' : mode === 'pass2' ? '深读卡' : '精读卡'}】开头的产出) 保存。`
+    },
+  }
+}
+
+/**
+ * Scholar profile: view the current model, distill fresh material, or save a
+ * newly written prose profile. The distill action returns counters + evidence
+ * and asks the model to write the profile in a fixed structure — the model
+ * saves with action=save. Nothing is sent anywhere; mirroring into
+ * dsh-auto-memory happens only when the user asks for it in chat.
+ */
+function profileTool() {
+  return {
+    name: 'literature_profile',
+    description:
+      '学者画像：查看/蒸馏/保存根据用户文献行为推断的学术背景、语用习惯与偏好。用户问「我的研究画像/我在关注什么/根据我的习惯来」时调用；蒸馏后把画像写回（action=save），并可建议用户同步到 auto-memory。',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', description: 'view（默认，看当前画像）| distill（取素材并蒸馏）| save（保存蒸馏结果）| self（登记用户自述）' },
+        content: { type: 'string', description: 'action=save 时的画像 Markdown；action=self 时的用户自述' },
+      },
+      required: [],
+    },
+    output: textResult(),
+    timeoutMs: 15000,
+    async execute(args) {
+      const { distillMaterial, profileMarkdown, saveProfileMarkdown, setSelfDeclared } = await import('./profile.js')
+      const action = String(args?.action ?? 'view')
+      if (action === 'save') {
+        const md = String(args?.content ?? '').trim()
+        if (!md) return '缺少画像内容（content）。'
+        await saveProfileMarkdown(md)
+        return '学者画像已保存。\n[下一步] 用户如需跨会话生效，建议把画像同步到 auto-memory 的用户级记忆（memory_user_pre），或由用户在记忆面板确认。'
+      }
+      if (action === 'self') {
+        await setSelfDeclared(args?.content)
+        return '已登记用户自述，下次蒸馏会纳入。'
+      }
+      if (action === 'distill') {
+        const material = await distillMaterial()
+        const existing = await profileMarkdown()
+        return [
+          material,
+          '',
+          existing ? '【现有画像】\n' + existing : '',
+          '',
+          '任务：依据素材写一份「学者画像」（Markdown，≤600 字），结构固定为：',
+          '## 研究领域（按熟悉度排序）',
+          '## 方法论偏好（实验/理论/工程）',
+          '## 术语与表达习惯（用户如何称呼概念、中英混用情况）',
+          '## 引用习惯（常用格式、语气）',
+          '## 当前关注与目标',
+          '只依据素材，不推断素材之外的内容；证据不足的维度写「暂无足够数据」。',
+          '写完后调用 literature_profile(action=save, content=画像) 保存。',
+        ].join('\n')
+      }
+      const current = await profileMarkdown()
+      return current ? '【当前学者画像】\n' + current : '尚无画像。调用 literature_profile(action=distill) 依据行为素材蒸馏一份。'
     },
   }
 }

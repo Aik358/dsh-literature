@@ -114,7 +114,7 @@ check('registered a prefix route', !!prefix)
 // Tools are mounted permanently since 0.3.1: the user wants the skill
 // selectable any time without activation gymnastics. Panel-open / intent
 // signals stay wired as positive signals but no longer gate registration.
-check('agent tools registered permanently (9)', registered.tools.length === 9, registered.tools.map((t) => t.name))
+check('agent tools registered permanently (10)', registered.tools.length === 10, registered.tools.map((t) => t.name))
 check('registered session hook event', registered.events.some(([n]) => n === 'session/event'))
 
 const handler = prefix.handler
