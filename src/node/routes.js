@@ -206,6 +206,40 @@ export async function handler(req, res, ctx) {
       return
     }
 
+    if (head === 'activate' && activation) {
+      // Fired by the browser the moment the side panel becomes visible: this
+      // is the primary "user actually wants literature features now" signal
+      // that mounts the agent tool surface.
+      activation.activate('panel-open')
+      writeJson(res, 200, { ok: true, active: true })
+      return
+    }
+
+    if (head === 'pyenv' && methodOk(req, 'GET')) {
+      // Figure-engine availability, CUA-style: detected interpreters plus
+      // venv/matplotlib status. The UI renders this as a status card with an
+      // optional "install deps" action.
+      const { detectPythons, figureInterpreter, venvExists, venvDir } = await import('./pyenv.js')
+      const pythons = await detectPythons()
+      const fig = await figureInterpreter()
+      writeJson(res, 200, {
+        pythons,
+        venv: { exists: venvExists(), dir: venvDir() },
+        figure: fig ? { exe: fig.exe, version: fig.version, source: fig.source, hasMatplotlib: fig.hasMatplotlib } : null,
+      })
+      return
+    }
+
+    if (head === 'install-deps' && methodOk(req, 'POST')) {
+      // Explicit user action only (settings button). Long-running; the client
+      // shows progress and the response lands when pip is done.
+      const { installFigureDeps } = await import('./pyenv.js')
+      const logs = []
+      const result = await installFigureDeps((m) => logs.push(m))
+      writeJson(res, result.ok ? 200 : 500, { ...result, logs })
+      return
+    }
+
     if (head === 'state' && methodOk(req, 'GET')) {
       await handleState(res)
       return
@@ -373,10 +407,17 @@ export async function handler(req, res, ctx) {
     }
 
     if (head === 'drop' && methodOk(req, 'POST')) {
-      // Drag-and-drop import: raw PDF bytes in the body, filename in the query.
+      // Drag-and-drop import: raw bytes in the body, filename in the query.
+      // PDFs flow through the paper pipeline; OOXML decks (.pptx) become
+      // courseware entries — detected by the zip magic, not the extension.
       const url = new URL(req.url ?? '/', 'http://127.0.0.1')
       const filename = url.searchParams.get('filename') || 'dropped.pdf'
       const buffer = await readRawBody(req, 128 * 1024 * 1024)
+      if (buffer.length > 4 && buffer.subarray(0, 2).toString('latin1') === 'PK' && /\.pptx$/i.test(filename)) {
+        const item = await pipeline.importDroppedCourseware(buffer, { filename })
+        writeJson(res, 200, { item })
+        return
+      }
       const item = await pipeline.importDroppedPdf(buffer, { filename })
       writeJson(res, 200, { item })
       return
@@ -473,8 +514,11 @@ export async function handler(req, res, ctx) {
   }
 }
 
-export function registerRoutes(ctx) {
+export function registerRoutes(ctx, { activation } = {}) {
   const disposers = [ctx.webServer.register({ kind: 'prefix', path: PREFIX, handler: (req, res) => handler(req, res, ctx) })]
+  // The panel-open activation signal is handled INSIDE the main handler
+  // (head === 'activate') — a second prefix registration here would race with
+  // the catch-all prefix above depending on match order.
   // Keep the AI-assist fallback session fresh: whichever session saw the most
   // recent activity is the one reader actions land in when the browser does
   // not supply an explicit id. Uses the zero-dependency session-track module —

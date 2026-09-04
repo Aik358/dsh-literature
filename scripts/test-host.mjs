@@ -111,7 +111,10 @@ await new Promise((r) => setTimeout(r, 300))
 
 const prefix = registered.routes.find((r) => r.kind === 'prefix')
 check('registered a prefix route', !!prefix)
-check('registered agent tools (2)', registered.tools.length === 2, registered.tools.map((t) => t.name))
+// Conditional activation: tools must NOT be registered by default. They only
+// mount after activation (panel-open or literature intent) — a coding session
+// must not carry literature tool schemas in its context.
+check('tools NOT registered by default', registered.tools.length === 0, registered.tools.map((t) => t.name))
 check('registered session hook event', registered.events.some(([n]) => n === 'session/event'))
 
 const handler = prefix.handler

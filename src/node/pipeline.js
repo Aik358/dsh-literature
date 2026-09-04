@@ -583,3 +583,56 @@ export async function importDroppedPdf(buffer, { filename = 'dropped.pdf' } = {}
 }
 
 export { normalizeDoi, arxivBase, log }
+
+/**
+ * Courseware import (.pptx). Parses the deck with the zero-dependency reader,
+ * stores the file alongside PDFs, and creates a `kind:'courseware'` entry
+ * whose `courseware` field carries the parse result (slide outline, text,
+ * notes, chart inventory). No network, no metadata lookup — the deck IS the
+ * content, unlike papers which need Crossref.
+ */
+export async function importDroppedCourseware(buffer, { filename = 'deck.pptx' } = {}) {
+  if (!buffer || buffer.length < 4 || buffer.subarray(0, 2).toString('latin1') !== 'PK') {
+    throw failure('network', '拖入的文件不是有效的 .pptx（旧版 .ppt 请先另存为 .pptx 或导出 PDF）')
+  }
+  const { parsePptx, deckToText } = await import('./courseware/pptx.js')
+  let parsed
+  try {
+    parsed = parsePptx(buffer)
+  } catch (e) {
+    throw failure('network', e?.message ?? '课件解析失败')
+  }
+
+  const base = String(filename).replace(/\.pptx$/i, '')
+  const title = parsed.slides[0]?.title && parsed.slides[0].title !== '第 1 页' ? parsed.slides[0].title : base
+
+  const key = `cw_${randomUUID().slice(0, 8)}`
+  const path = join(PDF_DIR, `${key.replace(/[^\w.-]+/g, '_')}.pptx`)
+  await mkdir(dirname(path), { recursive: true })
+  await writeFile(path, buffer)
+
+  const item = await store.putItem({
+    key,
+    kind: 'courseware',
+    display: title,
+    title,
+    sourceFile: filename,
+    state: 'fetched',
+    courseware: {
+      format: 'pptx',
+      path,
+      filename,
+      slideCount: parsed.slideCount,
+      aspect: parsed.aspect,
+      outline: parsed.slides.map((s) => ({ index: s.index, title: s.title })),
+      charts: parsed.charts.map((c) => ({ name: c.name, categories: c.categories, series: c.series })),
+      mediaCount: parsed.media.length,
+      text: deckToText(parsed, { maxChars: 60000 }),
+    },
+    pdf: { path, size: buffer.length, source: 'courseware-import', url: '', filename },
+    tags: ['课件'],
+    createdAt: Date.now(),
+  })
+  sse.emitItem(item)
+  return item
+}

@@ -45,12 +45,23 @@ export function textFromSessionEvent(event) {
   return ''
 }
 
-export function registerSessionHook(ctx) {
+export function registerSessionHook(ctx, { activation, detectIntent } = {}) {
   const disposers = []
 
   disposers.push(
     ctx.on('session/event', (session, event) => {
       const text = textFromSessionEvent(event)
+
+      // Intent-driven activation: a user message that clearly asks for
+      // literature work ("帮我在网上搜集文献" / "准备组会") mounts the tool
+      // surface even if the panel is closed. Conservative by design — see
+      // activation.js for the negative vocabulary that keeps coding sessions
+      // untouched.
+      if (activation && detectIntent && event?.type === 'user/message') {
+        const verdict = detectIntent(textFromSessionEvent(event))
+        if (verdict.active) activation.activate(verdict.reason)
+      }
+
       if (!text || text.length < 20) return
       if (!extractIdentifiers(text).length) return
       // Fire-and-forget: the panel hears about new entries over SSE.

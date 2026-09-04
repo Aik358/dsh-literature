@@ -57,6 +57,7 @@ function httpError(message, code) {
 
 const api = {
   state: () => request('/state'),
+  activate: () => request('/activate', { method: 'POST' }),
   config: () => request('/config'),
   saveConfig: (patch) => request('/config', { method: 'POST', body: patch }),
   scan: (text) => request('/scan', { method: 'POST', body: { text } }),

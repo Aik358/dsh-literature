@@ -110,3 +110,46 @@ export async function askAi(ctx, { key, action = 'ask', question = '', selection
   log(`ai ask steered (${action}) into session ${sid}`)
   return { ok: true, sessionId: sid, action }
 }
+
+/**
+ * Steers a figure into the current conversation as text + image blocks.
+ *
+ * Path (verified against the SDK types): plugin renders PNG bytes (matplotlib
+ * via the plugin venv) -> `ctx.attachments.saveImages()` -> ImageAttachmentRef
+ * -> createUserMessage({ content: [text, { type:'image', attachment }] }).
+ * Honors imageLimits by scaling down oversize rasters before admission.
+ */
+export async function sendFigure(ctx, { png, caption = '', title = '示意图', sessionId = null } = {}) {
+  if (!png || !png.length) throw Object.assign(new Error('没有图片数据'), { code: 'no_image' })
+  const sid = (sessionId && String(sessionId)) || recentSession()
+  if (!sid) throw Object.assign(new Error('当前没有活跃对话，请先开始一个对话再试'), { code: 'no_session' })
+  const agent = ctx?.agents?.get?.(sid)
+  if (!agent || typeof agent.steer !== 'function') {
+    throw Object.assign(new Error('当前对话不可用，请刷新后重试'), { code: 'no_session' })
+  }
+  if (!ctx?.attachments?.saveImages) {
+    throw Object.assign(new Error('宿主不支持图片附件'), { code: 'no_attachments' })
+  }
+
+  // Respect the deployment's image policy: cap bytes and dimensions.
+  let bytes = png
+  const limits = ctx.attachments.imageLimits ?? {}
+  const maxBytes = limits.maxImageBytes ?? 5 * 1024 * 1024
+  if (bytes.length > maxBytes) {
+    throw Object.assign(new Error(`图片超过宿主大小限制（${bytes.length} > ${maxBytes} 字节）`), { code: 'too_large' })
+  }
+  const mediaType = limits.mediaTypes?.length ? (limits.mediaTypes.includes('image/png') ? 'image/png' : limits.mediaTypes[0]) : 'image/png'
+
+  const [ref] = await ctx.attachments.saveImages([{ data: new Uint8Array(bytes), mediaType, name: title.slice(0, 60) }])
+  if (!ref) throw Object.assign(new Error('图片附件创建失败'), { code: 'no_attachments' })
+
+  const text = `【文献助手 · ${title}】\n${caption || '根据数据生成的示意图。'}\n（图由插件根据原始数据绘制，非原文插图）`
+  try {
+    const { createUserMessage } = await import('@deepseek-ai/dsh-llm')
+    agent.steer(createUserMessage({ content: [{ type: 'text', text }, { type: 'image', attachment: ref }], source: { kind: 'user' } }))
+  } catch {
+    agent.steer({ content: [{ type: 'text', text }, { type: 'image', attachment: ref }], source: { kind: 'user' }, role: 'user', id: `lit_fig_${Date.now()}` })
+  }
+  log(`figure steered into session ${sid}`)
+  return { ok: true, sessionId: sid }
+}

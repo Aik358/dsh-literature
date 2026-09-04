@@ -310,6 +310,10 @@ function setStatusFilter(v) {
   set({ statusFilter: v })
 }
 
+function setKindFilter(v) {
+  set({ kindFilter: v === 'paper' || v === 'courseware' ? v : 'all' })
+}
+
 function setTagFilter(v) {
   set({ tagFilter: v })
 }
@@ -465,6 +469,7 @@ const store = {
   retryItem,
   discardItem,
   setStatusFilter,
+  setKindFilter,
   setTagFilter,
   setSortBy,
   setItemTags,

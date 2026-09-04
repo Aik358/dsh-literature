@@ -347,9 +347,10 @@ function ItemList() {
     { label: 'CSL-JSON', onClick: () => store.exportSelected('csl-json') },
   ]
 
-  // 5.8 filtering (status + tag) and 5.9 sorting — all pure front-end.
+  // 5.8 filtering (status + kind + tag) and 5.9 sorting — all pure front-end.
   const statusFilter = state.statusFilter ?? 'all'
   const tagFilter = state.tagFilter ?? ''
+  const kindFilter = state.kindFilter ?? 'all'
   const allTags = [...new Set(state.items.flatMap((i) => (Array.isArray(i.tags) ? i.tags : [])))].sort((a, b) => a.localeCompare(b, 'zh'))
   const statusChips = [
     { v: 'all', label: t('filter.all') },
@@ -357,11 +358,17 @@ function ItemList() {
     { v: 'saved', label: t('filter.saved') },
     { v: 'failed', label: t('filter.failed') },
   ]
+  const kindChips = [
+    { v: 'all', label: t('filter.kindAll') },
+    { v: 'paper', label: t('filter.kindPaper') },
+    { v: 'courseware', label: t('filter.kindCourseware') },
+  ]
   const matches = (it) => {
     if (statusFilter === 'saved' && it.state !== 'saved') return false
     if (statusFilter === 'failed' && !String(it.state ?? '').endsWith('_failed')) return false
     if (statusFilter === 'pending' && (it.state === 'saved' || String(it.state ?? '').endsWith('_failed'))) return false
     if (tagFilter && !(Array.isArray(it.tags) ? it.tags : []).includes(tagFilter)) return false
+    if (kindFilter !== 'all' && (it.kind ?? 'paper') !== kindFilter) return false
     return true
   }
   const sortBy = state.sortBy ?? 'created'
@@ -395,6 +402,11 @@ function ItemList() {
         }, c.label),
       ),
       h('span', { style: { flex: 1 } }),
+      h(Dropdown, {
+        align: 'right',
+        trigger: (setOpen, open) => h(IconButton, { title: t('filter.kind'), onClick: () => setOpen(!open) }, h(Icon.Book, { size: 15 })),
+        items: kindChips.map((c) => ({ label: c.label, hint: kindFilter === c.v ? '\u2713' : undefined, onClick: () => store.setKindFilter(c.v) })),
+      }),
       h(Dropdown, {
         align: 'right',
         trigger: (setOpen, open) => h(IconButton, { title: t('filter.tag'), onClick: () => setOpen(!open) }, h(Icon.Tag, { size: 15 })),
@@ -1147,6 +1159,9 @@ function Panel({ onClose, embedded = false }) {
   useEffect(() => {
     if (!open) return undefined
     store.ensureEvents()
+    // Panel-open is the primary activation signal for the agent tool surface
+    // (see src/node/activation.js): fire-and-forget, failure is harmless.
+    api.activate().catch(() => {})
     return () => store.releaseEvents()
   }, [open])
   if (!open) return null

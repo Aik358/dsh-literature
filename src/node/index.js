@@ -4,6 +4,7 @@ import * as sse from './sse.js'
 import { registerRoutes } from './routes.js'
 import { registerTools } from './tools.js'
 import { registerSessionHook } from './session-hook.js'
+import { createActivation, detectIntent } from './activation.js'
 import { error, log } from './log.js'
 export const name = 'dsh-literature-pre'
 
@@ -33,10 +34,19 @@ export function apply(ctx, config) {
   const ready = (async () => {
     await ensureDirs()
     await store.init()
-    disposers.push(...registerRoutes(ctx))
-    disposers.push(...registerTools(ctx))
+
+    // Conditional activation: tools are NOT registered by default. They mount
+    // when the user opens the panel or sends a literature-flavoured message,
+    // and retire after the idle timeout — so a coding session never carries
+    // seven literature tool schemas in its context.
+    const activation = createActivation()
+    const toolsCtl = registerTools(ctx)
+    disposers.push(activation.onTransition(({ active }) => (active ? toolsCtl.mount() : toolsCtl.unmount())))
+    disposers.push(() => activation.dispose())
+
+    disposers.push(...registerRoutes(ctx, { activation }))
     try {
-      disposers.push(...registerSessionHook(ctx))
+      disposers.push(...registerSessionHook(ctx, { activation, detectIntent }))
     } catch (e) {
       error('session hook unavailable:', e.message)
     }
