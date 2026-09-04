@@ -111,10 +111,10 @@ await new Promise((r) => setTimeout(r, 300))
 
 const prefix = registered.routes.find((r) => r.kind === 'prefix')
 check('registered a prefix route', !!prefix)
-// Conditional activation: tools must NOT be registered by default. They only
-// mount after activation (panel-open or literature intent) — a coding session
-// must not carry literature tool schemas in its context.
-check('tools NOT registered by default', registered.tools.length === 0, registered.tools.map((t) => t.name))
+// Tools are mounted permanently since 0.3.1: the user wants the skill
+// selectable any time without activation gymnastics. Panel-open / intent
+// signals stay wired as positive signals but no longer gate registration.
+check('agent tools registered permanently (9)', registered.tools.length === 9, registered.tools.map((t) => t.name))
 check('registered session hook event', registered.events.some(([n]) => n === 'session/event'))
 
 const handler = prefix.handler

@@ -29,7 +29,7 @@ function textResult(value) {
  * literature-flavoured message, then retire after an idle timeout.
  */
 function toolDefs() {
-  return [lookupTool(), searchTool(), getTool(), citeTool(), noteTool(), statusTool(), saveTool(), figureTool()]
+  return [lookupTool(), searchTool(), getTool(), citeTool(), noteTool(), statusTool(), saveTool(), figureTool(), deepreadTool()]
 }
 
 export function registerTools(ctx) {
@@ -396,6 +396,59 @@ function figureTool() {
         if (e?.code === 'no_session') return '示意图已生成，但当前没有活跃对话可插入。请先打开一个对话再让我画图。'
         return '图片插入对话失败：' + (e?.message ?? '未知错误')
       }
+    },
+  }
+}
+
+/**
+ * Hands the model a structured reading package (built-in reading modes,
+ * distilled from community literature-survey skills). The model fills the
+ * template in its reply; saving is the model's job via literature_note with
+ * the matching pass tag, so passes accumulate on the item.
+ */
+function deepreadTool() {
+  const MODES = new Set(['pass1', 'pass2', 'pass3'])
+  return {
+    name: 'literature_deepread',
+    description:
+      '启动对某篇文献的结构化解读，返回内置的解读任务包（速读分流 / 深读主张与证据 / 精读第一性原理）。在用户要求「读一下这篇/总结这篇/精读/做文献笔记」时调用。解读完成后用 literature_note(key, 以【速读卡】/【深读卡】/【精读卡】开头的产出) 保存结果。',
+    parameters: {
+      type: 'object',
+      properties: {
+        key: { type: 'string', description: '条目 key' },
+        depth: { type: 'string', description: 'pass1 速读（默认）| pass2 深读主张与证据 | pass3 精读第一性原理' },
+      },
+      required: ['key'],
+    },
+    output: textResult(),
+    timeoutMs: 30000,
+    async execute(args) {
+      const key = String(args?.key ?? '')
+      if (!key) return '缺少条目 key。'
+      const mode = MODES.has(args?.depth) ? args.depth : 'pass1'
+      const item = await store.getItem(key)
+      if (!item) return `未找到条目 ${key}。请先用 literature_search 获取正确的 key。`
+      if (!item.pdf?.path) return `该条目还没有全文 PDF。可先 literature_save(action=fetch) 下载，或对有全文的条目使用本工具。`
+
+      const { extractPdfText } = await import('./pdf-text.js')
+      let text = ''
+      try {
+        text = await extractPdfText(item.pdf.path)
+      } catch {
+        return '无法解析该 PDF 的文本（文件可能损坏，或是无文本层的扫描件）。'
+      }
+      if (!text) return '该 PDF 没有可提取的文本（可能是扫描件）。'
+
+      const title = item.record?.title ?? item.title ?? item.display ?? key
+      // Figure inventory for pass3 (captions from the deck/chart layer come
+      // later; papers rely on the text pass for now).
+      const figures = []
+      for (const m of text.matchAll(/(?:Fig(?:ure)?|表|Table)\s*\d+[.:：][^\n]{5,90}/g)) {
+        if (figures.length < 12) figures.push(m[0].trim())
+      }
+      const { buildReadPackage } = await import('./courseware/reading-modes.js')
+      const pack = buildReadPackage(mode, { title, text, figures })
+      return pack + `\n\n— 解读完成后：literature_note(key, 以【${mode === 'pass1' ? '速读卡' : mode === 'pass2' ? '深读卡' : '精读卡'}】开头的产出) 保存。`
     },
   }
 }

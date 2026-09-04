@@ -13,7 +13,7 @@ export const name = 'dsh-literature-pre'
  * (including the SSE stream), `tools` lets the model trigger lookups and saves
  * directly instead of us guessing from reply text.
  */
-export const inject = ['webServer', 'tools']
+export const inject = ['webServer', 'tools', 'systemPrompt']
 
 export function apply(ctx, config) {
   // The plugin runs inside the same process as the whole `dsh web` server. A
@@ -35,14 +35,40 @@ export function apply(ctx, config) {
     await ensureDirs()
     await store.init()
 
-    // Conditional activation: tools are NOT registered by default. They mount
-    // when the user opens the panel or sends a literature-flavoured message,
-    // and retire after the idle timeout — so a coding session never carries
-    // seven literature tool schemas in its context.
+    // Tools are mounted PERMANENTLY: the user asked for the skill to be
+    // selectable any time, not gated behind signals. The activation machinery
+    // (panel-open / intent detection) stays wired as a *positive* signal — it
+    // refreshes recency tracking and can later drive a context-saving GUIDANCE
+    // tier — but it no longer gates the tool surface.
     const activation = createActivation()
+    activation.activate('always-on')
     const toolsCtl = registerTools(ctx)
+    toolsCtl.mount()
     disposers.push(activation.onTransition(({ active }) => (active ? toolsCtl.mount() : toolsCtl.unmount())))
     disposers.push(() => activation.dispose())
+
+    // Static capability note (byte-stable, prefix-cache safe): tells the model
+    // the literature tools exist and when to reach for them. Kept short.
+    try {
+      disposers.push(
+        ctx.systemPrompt.section({
+          name: 'dsh:dsh-literature-capabilities',
+          order: 9900,
+          text: () =>
+            [
+              '本机已安装文献插件（dsh-literature）：内置文献库 + PDF/课件阅读 + 规范引用生成。',
+              '用户提到「文献/论文/DOI/arXiv/引用/参考文献/综述/组会」或需要学术支撑时：',
+              '- 找库里已有的 → literature_search（先查再答，不要凭空编造条目）',
+              '- 看详情 → literature_get；结构化解读 → literature_deepread（速读/深读/精读三档，产出后用 literature_note 保存）',
+              '- 写作引用 → literature_cite（APA/GB/MLA/Chicago/BibTeX，勿手工拼装）',
+              '- 记录文献与当前工作的关系 → literature_note；用户明确要求画图时 → literature_figure',
+              '纪律：先 search 再 get；未找到时如实说「库里没有」；编码任务中不要主动使用这些工具。',
+            ].join('\n'),
+        }),
+      )
+    } catch (e) {
+      error('systemPrompt unavailable:', e.message)
+    }
 
     disposers.push(...registerRoutes(ctx, { activation }))
     try {
