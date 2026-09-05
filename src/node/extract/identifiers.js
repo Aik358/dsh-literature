@@ -15,19 +15,36 @@ const TRIM_RIGHT = /[.,;:!?。、，；：！？…—>'">）》\]]+$/
  */
 const CJK_PUNCT = '。、，；：！？（）【】《》〈〉…—～·'
 
+/**
+ * Strips trailing punctuation and unmatched closing brackets from an
+ * identifier tail (e.g. `https://doi.org/10.x/abc）` → `10.x/abc`).
+ *
+ * GH#1: the previous version could loop forever. When the tail held an
+ * UNMATCHED closing bracket and TRIM_RIGHT no longer changed anything, the
+ * bracket branch executed `out = next; continue` with `next === out` — zero
+ * progress, spinning the host's main thread on any chat message ending in a
+ * stray `)`. The loop now maintains the invariant that every iteration either
+ * shortens the string or returns, so it is bounded by |s|.
+ */
+const CLOSE_TO_OPEN = { ')': '(', ']': '[', '}': '{', '）': '（', '】': '【' }
+
 function trimRight(s) {
   let out = s
-  for (;;) {
+  while (out.length > 0) {
     const next = out.replace(TRIM_RIGHT, '')
-    // Only drop a closing bracket when it is unmatched inside the remainder.
-    const last = next[next.length - 1]
-    if ((last === ')' || last === ']' || last === '}' || last === '）' || last === '】') && !next.slice(0, -1).includes(last === ')' ? '(' : last === ']' ? '[' : last === '}' ? '{' : last === '）' ? '（' : '【')) {
-      out = next
+    if (next !== out) {
+      out = next // stripped punctuation — progress
       continue
     }
-    if (next === out) return next
-    out = next
+    const last = out[out.length - 1]
+    const openFor = CLOSE_TO_OPEN[last]
+    if (openFor && !out.slice(0, -1).includes(openFor)) {
+      out = out.slice(0, -1) // peeled one unmatched close — progress
+      continue
+    }
+    return out
   }
+  return out
 }
 
 const DOI_TAIL = `[^\\s"'<>\`|${CJK_PUNCT}]+`

@@ -660,6 +660,30 @@ const handler = prefix.handler
   check('intext has no italics', !intext.segments.some((s) => s.italic), intext.text)
 }
 
+// 14e. trimRight termination (GH#1: unmatched closing bracket spun forever on
+//      the host's main thread — every chat message >=20 chars passed through
+//      extractIdentifiers, so a stray ')' at the end froze DSH).
+{
+  const { trimRight, extractIdentifiers } = await import('../src/node/extract/identifiers.js')
+  check('trimRight strips unmatched half-width close', trimRight('abc)') === 'abc', trimRight('abc)'))
+  check('trimRight strips stacked unmatched closes', trimRight('abc)]}') === 'abc', trimRight('abc)]}'))
+  check('trimRight strips unmatched full-width close', trimRight('测试）') === '测试', trimRight('测试）'))
+  check('trimRight keeps matched pairs', trimRight('(abc)') === '(abc)', trimRight('(abc)'))
+  check('trimRight peels punctuation under a bracket', trimRight('doi。') === 'doi', trimRight('doi。'))
+  // DOI tails keep their slashes and inner chars but lose the stray close.
+  check('trimRight on a DOI tail', trimRight('10.1234/abc.def') === '10.1234/abc.def', trimRight('10.1234/abc.def'))
+  // The exact GH#1 shape: a long chat message ending in a stray ')'.
+  const hostile = '这是一段很长的会话消息用于复现 issue 第一号的死循环情况 :)'
+  const t0 = Date.now()
+  const hits = extractIdentifiers(hostile)
+  const dt = Date.now() - t0
+  check('extractIdentifiers survives stray close paren (GH#1)', dt < 500 && Array.isArray(hits), `${dt}ms, ${hits.length} hits`)
+  // Markdown-ish tail that used to hang: bracket + paren, no opener.
+  const t1 = Date.now()
+  extractIdentifiers('模型输出结尾像这样 **加粗文本**] 其他内容足够长以超过二十个字符)')
+  check('extractIdentifiers survives bracket+paren tail', Date.now() - t1 < 500, `${Date.now() - t1}ms`)
+}
+
 // 15. ISBN resolve path end-to-end (live API; may be offline in sandbox)
 {
   const { resolveIdentifier } = await import('../src/node/metadata/index.js')
