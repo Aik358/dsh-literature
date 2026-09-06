@@ -27,7 +27,7 @@
 - **T17 图片限制**：`ctx.attachments.imageLimits`（maxImageBytes/Pixels/Dimension/
   maxImagesPerMessage）。`ai.js sendFigure` 已做字节检查；尺寸超限需缩图后再交。
 
-**验证命令**（全绿才算完）：
+**T18 改源码必须先 build**：`test-host.mjs` 加载的是 `lib/index.js`（bundle）而非 src——改完源码直接跑测试测的是**旧产物**（0.3.5 修 /activate 作用域错误时踩过：测试红不代表修复无效，build 后即绿）。**验证命令**（全绿才算完）：
 ```
 "C:\Users\JH Z\.workbuddy\binaries\node\versions\22.22.2-2\node.exe" build.mjs
 …\node.exe scripts\smoke.mjs          # 26 ok
