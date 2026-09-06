@@ -185,7 +185,7 @@ async function readJsonBody(req) {
   return read(req)
 }
 
-export async function handler(req, res, ctx) {
+export async function handler(req, res, ctx, { activation } = {}) {
   if (!isLoopbackRequest(req)) {
     writeJson(res, 403, { error: 'forbidden: loopback-only', code: 'forbidden' })
     return
@@ -515,7 +515,12 @@ export async function handler(req, res, ctx) {
 }
 
 export function registerRoutes(ctx, { activation } = {}) {
-  const disposers = [ctx.webServer.register({ kind: 'prefix', path: PREFIX, handler: (req, res) => handler(req, res, ctx) })]
+  // activation MUST be forwarded into the handler explicitly: `handler` is a
+  // module-level function and cannot see registerRoutes' parameters. (GH: the
+  // first cut referenced `activation` directly from the handler body — an
+  // unbound identifier that only exploded at request time, "activation is
+  // not defined".)
+  const disposers = [ctx.webServer.register({ kind: 'prefix', path: PREFIX, handler: (req, res) => handler(req, res, ctx, { activation }) })]
   // The panel-open activation signal is handled INSIDE the main handler
   // (head === 'activate') — a second prefix registration here would race with
   // the catch-all prefix above depending on match order.

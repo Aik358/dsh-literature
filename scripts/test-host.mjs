@@ -129,6 +129,26 @@ const handler = prefix.handler
   check('non-loopback request is 403', res.status === 403, { status: res.status, body: body.slice(0, 60) })
 }
 
+// 1b. /activate (GH: the first cut referenced `activation` from a scope that
+//     did not have it — "activation is not defined" at request time, 500 on
+//     every panel-open). The activation instance is created inside apply() and
+//     bound via closure, so we assert the wire behaviour: ok + idempotent.
+{
+  const res = makeRes()
+  const req = makeReq('POST', '/api/dsh-literature/activate')
+  const p = collect(res)
+  await prefix.handler(req, res)
+  const body = await p
+  check('/activate answers ok (request-time binding fixed)', res.status === 200 && body.includes('"ok":true'), { status: res.status, body: body.slice(0, 60) })
+  // Idempotent: a second panel-open must answer the same way.
+  const res2 = makeRes()
+  const req2 = makeReq('POST', '/api/dsh-literature/activate')
+  const p2 = collect(res2)
+  await prefix.handler(req2, res2)
+  const body2 = await p2
+  check('/activate is idempotent', res2.status === 200 && body2.includes('"ok":true'), { status: res2.status, body: body2.slice(0, 60) })
+}
+
 // 2. state
 {
   const res = makeRes()
