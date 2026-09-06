@@ -60,12 +60,24 @@ async function postJson(path, payload, options) {
   return { status: res.status, body: text }
 }
 
+/**
+ * GH#3: HTTP header values must be ByteStrings (every char code <= 255), but
+ * the attachment metadata carries the paper title — and real titles contain
+ * characters like U+2212 (math minus, "LiFe1−xCoxAs"), which blew up
+ * `http` with "Cannot convert argument to a ByteString". Encoding every
+ * non-Latin-1 char as a JSON `\uXXXX` escape keeps the payload byte-legal
+ * while JSON.parse on the Zotero side still reconstructs the exact string.
+ */
+function asciiJson(value) {
+  return JSON.stringify(value).replace(/[^\x00-\xFF]/g, (ch) => '\\u' + ch.charCodeAt(0).toString(16).padStart(4, '0'))
+}
+
 async function postBuffer(path, buffer, { metadata, contentType, timeoutMs }) {
   const headers = {
     'Content-Type': contentType,
     'Content-Length': String(buffer.length),
   }
-  if (metadata) headers['X-Metadata'] = JSON.stringify(metadata)
+  if (metadata) headers['X-Metadata'] = asciiJson(metadata)
 
   const res = await request(path, { body: buffer, headers, timeoutMs })
   const text = await res.text().catch(() => '')

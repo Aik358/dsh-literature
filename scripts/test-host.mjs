@@ -684,6 +684,55 @@ const handler = prefix.handler
   check('extractIdentifiers survives bracket+paren tail', Date.now() - t1 < 500, `${Date.now() - t1}ms`)
 }
 
+// 14f. GH#3 — a title carrying U+2212 (math minus, "LiFe1−xCoxAs") blew up the
+//      Zotero connector: X-Metadata is an HTTP header, and header values must
+//      be ByteStrings (<=255 per char). U+2212 is 8722. The connector now
+//      escapes every non-Latin-1 char as a JSON \uXXXX escape, which is
+//      byte-legal AND reconstructs the exact string on JSON.parse.
+{
+  const http = await import('node:http')
+  const received = []
+  const srv = http.createServer((req, res) => {
+    const chunks = []
+    req.on('data', (c) => chunks.push(c))
+    req.on('end', () => {
+      const body = Buffer.concat(chunks)
+      if (req.url.includes('saveItems')) {
+        res.setHeader('Content-Type', 'application/json')
+        res.end(JSON.stringify({ sessionID: 's1', items: [{ id: 7 }] }))
+      } else {
+        received.push({ url: req.url, meta: req.headers['x-metadata'], bytes: body.length })
+        res.setHeader('Content-Type', 'application/json')
+        res.end(JSON.stringify({ ok: true }))
+      }
+    })
+  })
+  await new Promise((resolve) => srv.listen(0, '127.0.0.1', resolve))
+  const { saveConfig } = await import('../src/node/config.js')
+  await saveConfig({ zoteroPort: srv.address().port })
+  const { saveToZotero } = await import('../src/node/zotero/connector.js')
+  const hostileTitle = 'Observation of strong electron pairing in LiFe1−xCoxAs'
+  try {
+    const r = await saveToZotero({
+      item: { id: 7, itemType: 'journalArticle', title: hostileTitle },
+      pdfBuffer: Buffer.from('%PDF-fixture'),
+      pdfFileName: `Huo - 2024 - ${hostileTitle}.pdf`,
+      pdfUrl: 'https://www.nature.com/articles/ncomms7056.pdf',
+      sessionID: 's1',
+      timeoutMs: 8000,
+    })
+    check('gh3 saveToZotero survives U+2212 title', r.attachmentSaved === true, JSON.stringify(r))
+    const att = received.find((x) => x.url.includes('saveAttachment'))
+    check('gh3 X-Metadata header is all-ASCII', !!att && [...att.meta].every((ch) => ch.charCodeAt(0) <= 255), att?.meta?.slice(0, 80))
+    const meta = JSON.parse(att.meta)
+    check('gh3 metadata round-trips the math minus', meta.title.includes('\u2212'), meta.title?.slice(0, 80))
+  } finally {
+    srv.close()
+    const { saveConfig: restore } = await import('../src/node/config.js')
+    await restore({ zoteroPort: 23119 })
+  }
+}
+
 // 15. ISBN resolve path end-to-end (live API; may be offline in sandbox)
 {
   const { resolveIdentifier } = await import('../src/node/metadata/index.js')
