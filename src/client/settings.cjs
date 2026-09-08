@@ -375,6 +375,14 @@ function SettingsPage({ close }) {
         testResult ? h('span', { className: 'zt-hint' }, testResult) : null,
       ),
     ),
+
+    // GH#4: a save button that stays visible at the bottom of the long form —
+    // the header one is easy to forget after scrolling to the last field.
+    h('div', { className: 'zt-settings-savebar' },
+      h('span', { className: 'zt-hint', style: { flex: 1, minWidth: 0 } }, t('settings.savebarHint')),
+      saved ? h('span', { className: 'zt-hint' }, t('settings.saved')) : null,
+      h(Button, { variant: 'primary', onClick: persist }, t('action.confirm')),
+    ),
   )
 }
 

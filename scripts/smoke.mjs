@@ -76,6 +76,17 @@ const name = renderName(
 check('renders the template', name.startsWith('Jumper, John_2021_'), name)
 check('strips path separators', !/[\\/:*?"<>|]/.test(name), name)
 
+console.log('\n[titleFromFilename — Springer rule]')
+const { titleFromFilename } = await import('../src/node/importer.js')
+const sf1 = titleFromFilename('s11920-019-1079-z (1).pdf')
+check('springer stem with copy marker -> DOI', sf1?.kind === 'doi' && sf1.value === '10.1007/s11920-019-1079-z', sf1)
+const sf2 = titleFromFilename('s11306-020-01658-0.pdf')
+check('springer stem without marker -> DOI', sf2?.kind === 'doi' && sf2.value === '10.1007/s11306-020-01658-0', sf2)
+const sf3 = titleFromFilename('my paper notes.pdf')
+check('ordinary filename stays a title', sf3?.kind === 'title' && sf3.value === 'my paper notes', sf3)
+const sf4 = titleFromFilename('10.1038/s41586-021-03819-2.pdf')
+check('explicit DOI filename still wins', sf4?.kind === 'doi' && sf4.value === '10.1038/s41586-021-03819-2', sf4)
+
 console.log('\n[mini markdown (5.12)]')
 const md = (await import('../src/client/md.cjs')).default
 check('bold renders', md.renderMiniMd('**key idea**') === '<strong>key idea</strong>')

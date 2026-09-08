@@ -203,6 +203,9 @@ function ItemCard({ item, selectMode, selected, onToggleSelect, onContextMenu })
     {
       className: 'zt-card',
       'data-state': item.state,
+      // Whole-card click affordance: any blank spot opens the reader (the
+      // old behaviour effectively required hitting the title text).
+      'data-has-pdf': item.pdf?.path || item.zotero?.key ? '1' : '0',
       // Open the reader only when the click landed on the card body itself —
       // button / dropdown clicks must never bubble into navigation.
       onClick: (e) => {
@@ -447,9 +450,30 @@ function ItemList() {
             trigger: (setOpen, open) => h(Button, { onClick: () => setOpen(!open), disabled: !selection.length }, t('list.exportTitle')),
             items: exportItems,
           }),
+          h(Button, { variant: 'ghost', disabled: !selection.length, onClick: () => store.batchRetry() }, t('action.retry')),
+          h(Button, { variant: 'ghost', disabled: !selection.length, onClick: () => store.batchDiscard() }, t('action.discard')),
         )
       : null,
-    ctxMenu ? h(ContextMenu, { key: 'ctx', x: ctxMenu.x, y: ctxMenu.y, items: citeMenuFor(ctxMenu.item, setCiteDialog), onClose: () => setCtxMenu(null) }) : null,
+    ctxMenu
+      ? h(ContextMenu, {
+          key: 'ctx',
+          x: ctxMenu.x,
+          y: ctxMenu.y,
+          onClose: () => setCtxMenu(null),
+          items: [
+            ctxMenu.item.pdf?.path || ctxMenu.item.zotero?.key
+              ? { label: t('action.read'), onClick: () => store.selectItem(ctxMenu.item.key, 'reader') }
+              : null,
+            ctxMenu.item.pdf?.filename || ctxMenu.item.sourceFile
+              ? { label: t('action.reidentify'), onClick: () => store.reidentifyItem(ctxMenu.item.key) }
+              : null,
+            (ctxMenu.item.pdf?.path || ctxMenu.item.zotero?.key) || ctxMenu.item.pdf?.filename || ctxMenu.item.sourceFile
+              ? { divider: true }
+              : null,
+            ...citeMenuFor(ctxMenu.item, setCiteDialog),
+          ].filter(Boolean),
+        })
+      : null,
     citeDialog ? h(CitationDialog, { key: 'cite-dialog', item: citeDialog.item, onClose: () => setCiteDialog(null) }) : null,
   )
 }

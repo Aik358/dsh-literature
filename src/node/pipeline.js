@@ -582,6 +582,41 @@ export async function importDroppedPdf(buffer, { filename = 'dropped.pdf' } = {}
   return saved
 }
 
+/**
+ * Re-derives identifiers from the item's original filename and re-runs
+ * metadata resolution. Repairs entries whose fuzzy-title resolution picked a
+ * wrong record (e.g. a Springer PDF named s11920-019-1079-z.pdf that was
+ * matched by title instead of doi:10.1007/s11920-019-1079-z).
+ */
+export async function reidentifyItem(key) {
+  const item = await store.getItem(key)
+  if (!item) throw failure('not_found', '条目不存在')
+  const name = item.pdf?.filename ?? item.sourceFile ?? (item.rawValue ? `${item.rawValue}.pdf` : '')
+  const { titleFromFilename } = await import('./importer.js')
+  const hit = titleFromFilename(name)
+  if (!hit || hit.kind === 'title') {
+    throw failure('network', '无法从文件名识别出 DOI / arXiv 标识符，请手动粘贴标识符后重试')
+  }
+  let next = await store.patchItem(key, {
+    kind: hit.kind,
+    rawValue: hit.value,
+    display: hit.value,
+    doi: hit.kind === 'doi' ? hit.value : '',
+    arxiv: hit.kind === 'arxiv' ? hit.value : '',
+    isbn: '',
+    record: null,
+    error: null,
+  })
+  sse.emitItem(next)
+  try {
+    next = await resolveItem(key)
+  } catch {
+    /* resolution failed — keep the item; the client surfaces item.error */
+  }
+  sse.emitItem(next)
+  return next
+}
+
 export { normalizeDoi, arxivBase, log }
 
 /**

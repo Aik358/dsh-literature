@@ -216,6 +216,8 @@ const CSS = `
 .zt-card[data-selected='1'] { border-color: var(--dsw-alias-brand-primary, #4d6bfe); }
 .zt-card[data-state$='_failed'] { border-color: var(--dsw-alias-state-error-primary, #d93025); }
 .zt-card[data-state='duplicate'] { border-color: var(--dsw-alias-state-warn-primary, #b06000); }
+/* Items with a readable PDF open the reader from anywhere on the card. */
+.zt-card[data-has-pdf='1'] { cursor: pointer; }
 
 .zt-card-title {
   font-size: 14px;
@@ -521,6 +523,18 @@ body[data-ds-dark-theme] .zt-reader[data-night-mode='auto'] .zt-highlight { mix-
    sized to its content and its lower half is clipped with no way to scroll to
    it (that is why the bottom of the settings form used to be unreachable). */
 .zt-settings { flex: 1 1 auto; min-height: 0; padding: 16px; overflow-y: auto; }
+/* GH#4: sticky save bar at the bottom of the settings form. */
+.zt-settings-savebar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 16px -16px -16px;
+  padding: 10px 16px;
+  background: var(--dsw-alias-bg-layer-2, #fff);
+  border-top: 1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.18));
+}
 .zt-field { margin-bottom: 16px; }
 .zt-field > label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 4px; color: var(--dsw-alias-label-primary, #1f1f1f); }
 .zt-field > .zt-hint { margin-top: 4px; }

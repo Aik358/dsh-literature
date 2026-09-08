@@ -65,6 +65,8 @@ const api = {
   fetch: (key) => request('/fetch', { method: 'POST', body: { key } }),
   save: (key, opts = {}) => request('/save', { method: 'POST', body: { key, ...opts } }),
   retry: (key) => request('/retry', { method: 'POST', body: { key } }),
+  /** Re-derive identifiers from the filename and re-run metadata resolution. */
+  reidentify: (key) => request('/reidentify', { method: 'POST', body: { key } }),
   diff: (key) => request('/diff', { method: 'POST', body: { key } }),
   discard: (key) => request('/discard', { method: 'POST', body: { key } }),
   /** Partial update of an item (reader progress, tags, ...). */

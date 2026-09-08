@@ -26,6 +26,12 @@ export function titleFromFilename(name) {
   if (doi) return { kind: 'doi', value: doi[1].replace(/_/g, '/') }
   const arxiv = /\b(\d{4}\.\d{4,5})(v\d+)?\b/.exec(t)
   if (arxiv) return { kind: 'arxiv', value: arxiv[1] + (arxiv[2] ?? '') }
+  // Springer names article PDFs after their DOI suffix under 10.1007:
+  // s11920-019-1079-z.pdf -> doi:10.1007/s11920-019-1079-z. Tolerate the
+  // " (1)" / "(2)" copy markers browsers append to repeated downloads.
+  // Kept BEFORE the loose title cleanup, which would destroy the pattern.
+  const springer = /^([a-z]\d{4,6}-\d{2,4}-\d{2,6}(?:-[a-z0-9]{1,10})?)(?:\s*\(\d+\))?\s*$/i.exec(t.trim())
+  if (springer) return { kind: 'doi', value: `10.1007/${springer[1].toLowerCase()}` }
   t = t
     .replace(/^\[\d+\]\s*/, '')
     .replace(/\s*\(?\d{4}[a-z]?\)?\s*$/i, '')

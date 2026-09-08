@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { readFile, open as openFile, stat as statFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 import { isLoopbackRequest, writeJson, writeSseHead, parseRange, responseClosed, readRawBody } from './http.js'
@@ -76,30 +76,48 @@ async function servePdf(req, res, key) {
     writeJson(res, 400, { error: 'invalid key', code: 'invalidKey' })
     return
   }
-  let buffer
+  // Size first, then serve: range requests (pdf.js issues them per data
+  // chunk when the reader runs in per-page mode) read ONLY the requested
+  // slice from disk instead of pulling the whole file on every request.
+  let size = 0
   try {
-    buffer = await readFile(path)
+    size = (await statFile(path)).size
   } catch {
     writeJson(res, 404, { error: 'pdf not downloaded yet', code: 'pdfNotDownloaded' })
     return
   }
 
-  const range = parseRange(req.headers.range, buffer.length)
+  const range = parseRange(req.headers.range, size)
   if (range?.invalid) {
-    res.writeHead(416, { 'content-range': `bytes */${buffer.length}`, 'content-length': 0 })
+    res.writeHead(416, { 'content-range': `bytes */${size}`, 'content-length': 0 })
     res.end()
     return
   }
 
   if (range) {
-    const slice = buffer.subarray(range.start, range.end + 1)
+    const len = range.end - range.start + 1
+    const slice = Buffer.alloc(len)
+    const fh = await openFile(path, 'r')
+    try {
+      await fh.read(slice, 0, len, range.start)
+    } finally {
+      await fh.close()
+    }
     res.writeHead(206, {
       'content-type': 'application/pdf',
       'content-length': slice.length,
-      'content-range': `bytes ${range.start}-${range.end}/${buffer.length}`,
+      'content-range': `bytes ${range.start}-${range.end}/${size}`,
       'accept-ranges': 'bytes',
     })
     res.end(req.method === 'HEAD' ? undefined : slice)
+    return
+  }
+
+  let buffer
+  try {
+    buffer = await readFile(path)
+  } catch {
+    writeJson(res, 404, { error: 'pdf not downloaded yet', code: 'pdfNotDownloaded' })
     return
   }
 
@@ -280,6 +298,13 @@ export async function handler(req, res, ctx, { activation } = {}) {
     if (head === 'retry' && methodOk(req, 'POST')) {
       const body = await readJsonBody(req)
       const item = await pipeline.retryItem(String(body?.key ?? ''))
+      writeJson(res, 200, { item })
+      return
+    }
+
+    if (head === 'reidentify' && methodOk(req, 'POST')) {
+      const body = await readJsonBody(req)
+      const item = await pipeline.reidentifyItem(String(body?.key ?? ''))
       writeJson(res, 200, { item })
       return
     }

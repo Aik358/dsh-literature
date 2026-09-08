@@ -271,6 +271,57 @@ async function retryItem(key) {
   }
 }
 
+/** GH#4: batch actions on the multi-selection. */
+async function batchDiscard(keys) {
+  const list = (keys ?? state.selection).slice()
+  if (!list.length) return
+  if (!window.confirm(`${t('list.confirmDiscard')} (${list.length})`)) return
+  for (const k of list) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      await api.discard(k)
+    } catch { /* keep going — report nothing per item */ }
+  }
+  if (state.selectedKey && list.includes(state.selectedKey)) set({ selectedKey: null, view: 'list' })
+  set({ selection: [] })
+  await refresh()
+  flash(t('list.discarded') + ' ' + list.length)
+}
+
+async function batchRetry(keys) {
+  const list = (keys ?? state.selection).slice()
+  if (!list.length) return
+  let n = 0
+  for (const k of list) {
+    const it = state.items.find((i) => i.key === k)
+    if (!it) continue
+    const stt = String(it.state ?? '')
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      if (stt.endsWith('_failed') || stt === 'discovered') await api.retry(k)
+      else if (stt === 'resolved' && !it.pdf) await api.fetch(k)
+      else continue
+      n += 1
+    } catch { /* keep going */ }
+  }
+  await refresh()
+  flash(t('list.retried') + ' ' + n)
+}
+
+/** Re-runs metadata resolution from the original filename (wrong-record repair). */
+async function reidentifyItem(key) {
+  setBusy(key, true)
+  try {
+    await api.reidentify(key)
+    await refresh()
+    flash(t('action.reidentifyDone'))
+  } catch (e) {
+    flash(e.message)
+  } finally {
+    setBusy(key, false)
+  }
+}
+
 function toggleSelectMode() {
   set({ selectMode: !state.selectMode, selection: state.selectMode ? [] : state.selection })
 }
@@ -473,6 +524,9 @@ const store = {
   setTagFilter,
   setSortBy,
   setItemTags,
+  batchDiscard,
+  batchRetry,
+  reidentifyItem,
   toggleSelectMode,
   toggleSelect,
   selectAllItems,

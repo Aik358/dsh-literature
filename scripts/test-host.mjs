@@ -516,6 +516,46 @@ const handler = prefix.handler
   check('notesMarkdown headings and blockquote', md.startsWith('# Paper') && md.includes('## p.1') && md.includes('> q1') && md.includes('n1'), md)
 }
 
+// 12d. /reidentify: re-derive identifiers from the original filename
+{
+  // Bundle-route drop (bundle store, see section 17 note) with a TITLE-kind
+  // name; reidentify must fail with a clear message (no identifier in name).
+  const pdf = Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(120, 84)])
+  const dRes = makeRes()
+  const dReq = makeReq('POST', '/api/dsh-literature/drop?filename=plain%20title%20paper.pdf', '127.0.0.1', pdf)
+  const dp = collect(dRes)
+  await handler(dReq, dRes)
+  const dBody = JSON.parse(await dp)
+  const key = dBody.item?.key
+  check('12d setup: title-kind entry created', !!key, dBody.error)
+
+  const res = makeRes()
+  const req = makeReq('POST', '/api/dsh-literature/reidentify', '127.0.0.1',
+    Buffer.from(JSON.stringify({ key })))
+  const p = collect(res)
+  await handler(req, res)
+  const body = JSON.parse(await p)
+  check('reidentify without identifiers in the name fails clearly',
+    res.status === 500 && /无法从文件名识别/.test(body.error ?? ''), { status: res.status, error: body.error })
+
+  // DOI-kind entry: reidentify re-derives the same DOI (resolution may fail
+  // offline — the item keeps its identifiers either way).
+  const d2Res = makeRes()
+  const d2Req = makeReq('POST', '/api/dsh-literature/drop?filename=10.1234%2Fsome.test.pdf', '127.0.0.1', pdf)
+  const d2p = collect(d2Res)
+  await handler(d2Req, d2Res)
+  const d2Body = JSON.parse(await d2p)
+  const key2 = d2Body.item?.key
+
+  const res2 = makeRes()
+  const req2 = makeReq('POST', '/api/dsh-literature/reidentify', '127.0.0.1',
+    Buffer.from(JSON.stringify({ key: key2 })))
+  const p2 = collect(res2)
+  await handler(req2, res2)
+  const body2 = JSON.parse(await p2)
+  check('reidentify keeps the derived DOI', res2.status === 200 && body2.item?.doi === '10.1234/some.test' , { status: res2.status, doi: body2.item?.doi })
+}
+
 // 13. custom source templates reject templates whose variables are missing
 {
   const { renderSourceTemplate } = await import('../src/node/fetch/pdf.js')

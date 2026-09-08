@@ -1,10 +1,12 @@
 # DSH Literature · Side Panel
 
-[![English](https://img.shields.io/badge/Language-English-blue)](README_EN.md) · [中文](./README.md)
+[![English](https://img.shields.io/badge/Language-English-blue)](README_EN.md) · [中文](./README.md) · [💬 QQ group](https://qm.qq.com/q/v7Asxn6vPa)
 
 > Detect, download, read and archive academic papers from the DeepSeek Harness
 > side panel. DOIs / arXiv IDs / titles from the conversation drop straight
 > into your local library with full text at hand.
+
+**Feedback & chat:** join the community QQ group — [Join the dsh-literature group](https://qm.qq.com/q/v7Asxn6vPa) — bug reports, usage tips, and quick responses faster than GitHub issues.
 
 ---
 
@@ -37,7 +39,7 @@ dsh plugin --profile web add @a9i5k4/dsh-literature
 - **Full-text download** — OA multi-source chain (arXiv → OpenAlex OA → Unpaywall → DOI → publisher link), classified failures with retry; user-configured custom sources
 - **Citation generator** — Scribbr-style: reference list / in-text / direct quote (with page) × APA 7 / GB/T 7714 / MLA 9 / Chicago 17 / **BibTeX**, one-click copy; **right-click** any card for the citation menu
 - **Library management** — scan an import folder (DOI/arXiv/title inferred from file names), batch-import from a Zotero-ecosystem library, optional folder watch, add/remove entries; **tags** and **status filters**, **sorting** (added time / title / year); **multi-select batch export** of RIS / BibTeX / CSL-JSON
-- **Side-panel reader** — built-in PDF viewer: zoom, pages, outline, full-text search, multi-colour highlights and notes (simple **Markdown notes**: bold / italic / inline code); **reading-position memory**, **keyboard shortcuts** (←/→ page, +/- zoom, / search, Esc dismiss), **night reading mode** (follows the dark theme or forced), **thumbnail sidebar** (≤50 pages), **one-click Markdown export** of all highlights & notes
+- **Side-panel reader** — built-in PDF viewer: zoom, pages, outline, full-text search, multi-colour highlights and notes (simple **Markdown notes**: bold / italic / inline code); **reading-position memory**, **keyboard shortcuts** (←/→ page, +/- zoom, / search, Esc dismiss), **night reading mode** (follows the dark theme or forced), **thumbnail sidebar** (≤50 pages), **one-click Markdown export** of all highlights & notes, **per-page loading** (on-demand byte ranges — large files open without stalling)
 - **AI assistant** — ChatPDF / SciSpace-style selection actions: **translate / explain / summarize** the selected passage, **ask questions about the full text**, or generate a **paper summary** — answers are steered into your current DeepSeek Harness chat, so you can keep asking follow-ups
 - **Search portals** — every item links to Google Scholar / Baidu Xueshu / CNKI / source page
 - **Conflict preview** — field-level diff against existing entries before saving

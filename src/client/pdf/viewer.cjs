@@ -91,7 +91,19 @@ async function createViewer(root, options) {
   // reload the page to read a paper.
   let lastError = null
   for (let attempt = 1; attempt <= 2; attempt += 1) {
-    const task = lib.getDocument({ url: options.pdfUrl, withCredentials: false, isEvalSupported: false })
+    // Per-page loading: disableAutoFetch + disableStream make pdf.js fetch
+    // only the byte ranges the visible pages actually need (the host route
+    // answers partial requests), instead of silently pulling the WHOLE file
+    // in the background on open — the first paint no longer waits for it.
+    // Falls back to a full download automatically if ranges are unsupported.
+    const task = lib.getDocument({
+      url: options.pdfUrl,
+      withCredentials: false,
+      isEvalSupported: false,
+      disableAutoFetch: true,
+      disableStream: true,
+      rangeChunkSize: 1 << 16,
+    })
     controller.loadingTask = task
     // A flag rather than matching the rejection message: pdf.js wording varies
     // by version, and a string match here used to depend on the very Chinese
