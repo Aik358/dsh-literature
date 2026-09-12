@@ -18,18 +18,20 @@ export const inject = ['webServer', 'tools', 'systemPrompt']
 export function apply(ctx, config) {
   // The plugin runs inside the same process as the whole `dsh web` server. A
   // throw that escapes a route handler would otherwise take the host with it.
-  const onUncaught = (e) => error('uncaught exception:', e?.stack ?? e)
-  const onUnhandled = (e) => error('unhandled rejection:', e?.stack ?? e)
-  process.on('uncaughtException', onUncaught)
-  process.on('unhandledRejection', onUnhandled)
-
+  // Route/tool handlers already catch their own errors; no process-global
+  // handlers are installed here — swallowing the HOST's uncaught exceptions
+  // would silently change its crash semantics for everyone.
   const disposers = []
-
-  ctx.effect(() => {
-    ensureDirs()
-      .then(() => store.init())
-      .catch((e) => error('storage init failed:', e.message))
-  }, 'dsh-literature: storage')
+  let disposed = false
+  const runDisposers = () => {
+    for (const d of disposers.splice(0)) {
+      try {
+        d?.()
+      } catch (e) {
+        error('dispose failed:', e.message)
+      }
+    }
+  }
 
   const ready = (async () => {
     await ensureDirs()
@@ -39,12 +41,13 @@ export function apply(ctx, config) {
     // selectable any time, not gated behind signals. The activation machinery
     // (panel-open / intent detection) stays wired as a *positive* signal — it
     // refreshes recency tracking and can later drive a context-saving GUIDANCE
-    // tier — but it no longer gates the tool surface.
+    // tier — but it no longer gates the tool surface, so nothing ever unmounts
+    // the tools except disposal of the plugin itself.
     const activation = createActivation()
     activation.activate('always-on')
     const toolsCtl = registerTools(ctx)
     toolsCtl.mount()
-    disposers.push(activation.onTransition(({ active }) => (active ? toolsCtl.mount() : toolsCtl.unmount())))
+    disposers.push(() => toolsCtl.unmount())
     disposers.push(() => activation.dispose())
 
     // Static capability note (byte-stable, prefix-cache safe): tells the model
@@ -79,6 +82,13 @@ export function apply(ctx, config) {
     disposers.push(sse.startHeartbeat())
     try {
       const { startWatcher } = await import('./importer.js')
+      // Dispose-during-startup: an awaited import is the one window in which
+      // the disposer may already have run; bail out instead of mounting a
+      // watcher (and pushing a never-run disposer) on a disposed plugin.
+      if (disposed) {
+        runDisposers()
+        return
+      }
       disposers.push(startWatcher())
     } catch (e) {
       error('folder watcher unavailable:', e.message)
@@ -89,6 +99,7 @@ export function apply(ctx, config) {
     // spinning on /api/doctor/status forever. Spawn the supervisor under the
     // host process so it lives exactly as long as the host does.
     const doctorTimer = setTimeout(() => {
+      if (disposed) return
       import('./doctor-selfheal.js')
         .then(({ ensureDoctorSupervisor }) => ensureDoctorSupervisor())
         .catch((e) => error('doctor supervisor heal unavailable:', e.message))
@@ -97,19 +108,15 @@ export function apply(ctx, config) {
     disposers.push(() => clearTimeout(doctorTimer))
 
     log('dsh-literature host half ready')
-  })().catch((e) => error('dsh-literature startup failed:', e?.stack ?? e))
+  })().catch((e) => {
+    error('dsh-literature startup failed:', e?.stack ?? e)
+    runDisposers()
+  })
 
   return () => {
+    disposed = true
     ready.catch(() => {})
-    for (const d of disposers.splice(0)) {
-      try {
-        d?.()
-      } catch (e) {
-        error('dispose failed:', e.message)
-      }
-    }
-    process.off('uncaughtException', onUncaught)
-    process.off('unhandledRejection', onUnhandled)
+    runDisposers()
     store.flush().catch(() => {})
     log('dsh-literature host half disposed')
   }
