@@ -16,7 +16,7 @@ function apiHeaders() {
 async function call(path, { timeoutMs = 10000, headers = {} } = {}) {
   await ensureZotero()
   const config = await loadConfig()
-  return httpGetJson(`${baseUrl(config.zoteroPort)}${path}`, { timeoutMs, headers: { ...apiHeaders(), ...headers } })
+  return httpGetJson(`${baseUrl(config.zoteroPort)}${path}`, { timeoutMs, allowPrivate: true, headers: { ...apiHeaders(), ...headers } })
 }
 
 /** Local API responses use the web API v3 envelope: `{ key, data, ... }`. */
@@ -55,7 +55,7 @@ export async function listTags({ limit = 100 } = {}) {
 export async function getFileBuffer(key) {
   await ensureZotero()
   const config = await loadConfig()
-  return httpGetBuffer(`${baseUrl(config.zoteroPort)}/api/users/0/items/${encodeURIComponent(key)}/file`, { timeoutMs: 60000 })
+  return httpGetBuffer(`${baseUrl(config.zoteroPort)}/api/users/0/items/${encodeURIComponent(key)}/file`, { timeoutMs: 60000, allowPrivate: true })
 }
 
 export async function getFulltext(key) {

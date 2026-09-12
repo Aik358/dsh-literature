@@ -1,4 +1,4 @@
-import { httpGetJson } from '../net.js'
+import { httpGetJson, sanitizeHttpUrl } from '../net.js'
 
 const BASE = 'https://api.crossref.org'
 
@@ -82,7 +82,7 @@ export function normalizeWork(work) {
     doi: work.DOI ?? '',
     isbn: Array.isArray(work.ISBN) ? work.ISBN[0] ?? '' : work.ISBN ?? '',
     issn: Array.isArray(work.ISSN) ? work.ISSN[0] ?? '' : work.ISSN ?? '',
-    url: work.URL ?? (work.DOI ? `https://doi.org/${work.DOI}` : ''),
+    url: work.URL ? sanitizeHttpUrl(work.URL) : (work.DOI ? `https://doi.org/${work.DOI}` : ''),
     abstract: cleanText(work.abstract),
     language: work.language ?? '',
     raw: work,

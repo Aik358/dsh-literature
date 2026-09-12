@@ -50,7 +50,7 @@ async function candidates(record, { unpaywallEmail, customSources = [] } = {}) {
 
   const push = (url, source, kind = 'pdf', headers) => {
     if (!url) return
-    out.push({ url: String(url), source, kind, headers })
+    out.push({ url: String(url), source, kind, headers, trustedSource: Boolean(trusted) })
   }
 
   if (record.arxiv) {
@@ -109,7 +109,7 @@ async function candidates(record, { unpaywallEmail, customSources = [] } = {}) {
   // the user's `order` field; the plugin never ships such sources itself.
   for (const src of [...customSources].filter((x) => x && x.enabled).sort((a, b) => (a.order ?? 100) - (b.order ?? 100))) {
     const url = renderSourceTemplate(src.urlTemplate, record)
-    if (url) push(url, src.label || src.id || 'custom', 'pdf', src.headers)
+    if (url) push(url, src.label || src.id || 'custom', 'pdf', src.headers, true)
   }
 
   // Drop duplicates while preserving order.
@@ -175,6 +175,7 @@ export async function fetchPdf(record, { timeoutMs = 30000, unpaywallEmail = '',
     try {
       const { buffer, contentType, finalUrl } = await httpGetBuffer(cand.url, {
         timeoutMs,
+        allowPrivate: cand.trustedSource === true,
         accept: 'application/pdf,*/*;q=0.8',
         ...(cand.headers && typeof cand.headers === 'object' ? { headers: cand.headers } : {}),
       })
@@ -191,7 +192,7 @@ export async function fetchPdf(record, { timeoutMs = 30000, unpaywallEmail = '',
         if (discovered) {
           // Inherit the candidate's headers: a PDF discovered on a custom
           // mirror usually needs the same auth/session the landing page did.
-          pending.unshift({ url: discovered, source: `${cand.source} (PDF 链接)`, kind: 'pdf', headers: cand.headers })
+          pending.unshift({ url: discovered, source: `${cand.source} (PDF 链接)`, kind: 'pdf', headers: cand.headers, trustedSource: cand.trustedSource })
           continue
         }
         failures.push({

