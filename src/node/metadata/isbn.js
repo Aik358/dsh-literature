@@ -1,4 +1,4 @@
-import { httpGetJson } from '../net.js'
+import { httpGetJson, sanitizeHttpUrl } from '../net.js'
 
 /**
  * ISBN → book metadata via the Open Library Books API (no key required).
@@ -42,7 +42,7 @@ export function normalizeOpenLibrary(data) {
     doi: '',
     isbn: '',
     issn: '',
-    url: data.url || (data.identifiers?.openlibrary ? `https://openlibrary.org${data.identifiers.openlibrary[0]}` : ''),
+    url: data.url ? sanitizeHttpUrl(data.url) : (data.identifiers?.openlibrary ? `https://openlibrary.org${data.identifiers.openlibrary[0]}` : ''),
     abstract: '',
     raw: data,
   }

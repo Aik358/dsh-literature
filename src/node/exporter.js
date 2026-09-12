@@ -92,8 +92,12 @@ function ris(record) {
  */
 export async function exportToDirectory(record, pdfBuffer) {
   const config = await loadConfig()
-  const dir = resolve(config.dirPath || '')
-  if (!dir) throw Object.assign(new Error('未配置导出目录'), { code: 'no_dir' })
+  // Check the RAW string before resolve(): resolve('') is the process CWD,
+  // which is always truthy — an unconfigured dirPath would otherwise silently
+  // export into whatever directory `dsh web` was started from.
+  const rawDir = String(config.dirPath ?? '').trim()
+  if (!rawDir) throw Object.assign(new Error('未配置导出目录'), { code: 'no_dir' })
+  const dir = resolve(rawDir)
 
   await mkdir(dir, { recursive: true })
 

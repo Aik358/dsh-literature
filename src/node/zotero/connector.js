@@ -73,9 +73,10 @@ function asciiJson(value) {
 }
 
 async function postBuffer(path, buffer, { metadata, contentType, timeoutMs }) {
+  // Content-Length is a forbidden header on WHATWG fetch() bodies — undici
+  // recomputes it, so setting it manually is dead weight at best.
   const headers = {
     'Content-Type': contentType,
-    'Content-Length': String(buffer.length),
   }
   if (metadata) headers['X-Metadata'] = asciiJson(metadata)
 

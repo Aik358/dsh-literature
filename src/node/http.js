@@ -6,10 +6,47 @@ const DEFAULT_LIMIT = 64 * 1024 * 1024 // 64 MB — enough for large journal PDF
  * Every route in this plugin is loopback-only. The DSH web server may also be
  * bound to a LAN address, and nothing here should be reachable from anywhere
  * but the machine itself.
+ *
+ * `remoteAddress` alone is not enough for a browser threat model: any web page
+ * can aim requests at 127.0.0.1, and a DNS-rebound origin defeats CORS
+ * entirely. Two extra checks close those paths:
+ *   - the Host header must name a loopback host (blocks DNS rebinding);
+ *   - a state-changing request that carries an Origin header must carry a
+ *     loopback Origin (blocks cross-site form/fetch calls from web pages).
  */
+const LOOPBACK_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '::1'])
+
+function hostnameOf(hostHeader) {
+  const h = String(hostHeader ?? '').trim().toLowerCase()
+  if (!h) return ''
+  if (h.startsWith('[')) {
+    const end = h.indexOf(']')
+    return end === -1 ? '' : h.slice(1, end)
+  }
+  return h.split(':')[0]
+}
+
+function originHostname(originHeader) {
+  try {
+    return new URL(String(originHeader ?? '').trim()).hostname.toLowerCase()
+  } catch {
+    return null // absent or malformed: null means "not present", '' means "present but empty"
+  }
+}
+
 export function isLoopbackRequest(req) {
   const remote = req.socket?.remoteAddress ?? ''
-  return remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1'
+  const fromLoopback = remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1'
+  if (!fromLoopback) return false
+  if (!LOOPBACK_HOSTNAMES.has(hostnameOf(req.headers?.host))) return false
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    const origin = req.headers?.origin
+    if (origin !== undefined) {
+      const host = originHostname(origin)
+      if (host === null || host === '' || !LOOPBACK_HOSTNAMES.has(host)) return false
+    }
+  }
+  return true
 }
 
 export function writeJson(res, status, body) {

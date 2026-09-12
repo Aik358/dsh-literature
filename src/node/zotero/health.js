@@ -20,7 +20,7 @@ export async function ping({ port, timeoutMs = 1500 } = {}) {
   const config = await loadConfig()
   const url = `${baseUrl(port ?? config.zoteroPort)}/connector/ping`
   try {
-    const res = await httpGet(url, { timeoutMs })
+    const res = await httpGet(url, { timeoutMs, allowPrivate: true })
     const version = res.headers.get('x-zotero-version') ?? ''
     await res.text().catch(() => '')
     return { running: true, version, url: baseUrl(port ?? config.zoteroPort) }
@@ -43,6 +43,7 @@ export async function describe() {
     try {
       const res = await httpGet(`${baseUrl(config.zoteroPort)}/api/users/0/items/top?limit=1&format=json`, {
         timeoutMs: 3000,
+        allowPrivate: true,
         headers: { 'Zotero-API-Version': '3' },
       })
       const total = res.headers.get('total-results')

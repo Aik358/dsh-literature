@@ -41,13 +41,20 @@ const FAILURE_MESSAGES = {
 }
 
 function failure(code, message, extra = {}) {
-  return {
+  // A real Error (stack, name) that still serializes to the plain shape the
+  // store expects for item.error — thrown failures keep a usable message in
+  // logs instead of "[object Object]".
+  const detail = {
     code,
     message: message || FAILURE_MESSAGES[code] || '操作失败',
     // Only transient conditions are worth a retry button.
     retryable: !['paywalled', 'needs_login', 'no_source', 'not_found', 'no_dir', 'no_metadata'].includes(code),
     ...extra,
   }
+  const err = new Error(detail.message)
+  Object.assign(err, detail)
+  err.toJSON = () => detail
+  return err
 }
 
 function pdfPathFor(key) {
@@ -264,7 +271,22 @@ export async function resolveItem(key) {
   }
 }
 
-export async function fetchItemPdf(key) {
+/**
+ * Per-key in-flight memo: a double-clicked download (or a retry racing the
+ * original fetch) must not run two concurrent downloads that interleave
+ * writeFile calls on the same path — a reader could see a truncated PDF.
+ */
+const fetchInFlight = new Map()
+
+export function fetchItemPdf(key) {
+  const running = fetchInFlight.get(key)
+  if (running) return running
+  const p = fetchItemPdfLocked(key).finally(() => fetchInFlight.delete(key))
+  fetchInFlight.set(key, p)
+  return p
+}
+
+async function fetchItemPdfLocked(key) {
   const item = await store.getItem(key)
   if (!item) throw failure('not_found', '条目不存在')
   if (item.pdf?.path) return item
