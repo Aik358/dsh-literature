@@ -1,4 +1,4 @@
-import { httpGetJson } from '../net.js'
+import { httpGetJson, sanitizeHttpUrl } from '../net.js'
 
 const BASE = 'https://api.openalex.org'
 
@@ -63,7 +63,7 @@ export function normalizeWork(work) {
     doi: (work.doi ?? '').replace(/^https?:\/\/(dx\.)?doi\.org\//i, ''),
     isbn: Array.isArray(work.isbns) ? work.isbns[0] ?? '' : '',
     issn: Array.isArray(venue.issn) ? venue.issn[0] ?? '' : venue.issn_l ?? '',
-    url: work.doi ?? work.id ?? '',
+    url: work.doi ?? sanitizeHttpUrl(work.id ?? ''),
     abstract: reconstructAbstract(work.abstract_inverted_index),
     language: work.language_code ?? '',
     openAccess: {

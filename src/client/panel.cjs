@@ -83,11 +83,30 @@ function citeMenuFor(item, openDialog) {
   ]
 }
 
+/** Opens an external link. Only http(s) (plus the zotero: deep link) may
+ *  open: a record.url imported from a shared Zotero library could otherwise
+ *  carry a javascript: scheme, and an opened about:blank inherits the GUI's
+ *  origin — same-origin script execution. noopener keeps the opened page from
+ *  navigating the DSH GUI back (reverse tabnabbing). */
+function openExternal(url) {
+  if (!/^(https?:|zotero:)/i.test(String(url ?? ''))) return
+  window.open(url, '_blank', 'noopener,noreferrer')
+}
+
+/** The item's source-page URL, or '' when there is nothing safe to open.
+ *  Remote-supplied record.url strings are scheme-gated; the DOI fallback is
+ *  encoded so punctuation/CJK in a DOI can't mangle the URL. */
+function safeSourceUrl(item) {
+  const raw = item.record?.url
+  if (raw && /^https?:\/\//i.test(raw)) return raw
+  return item.doi ? `https://doi.org/${encodeURIComponent(item.doi)}` : ''
+}
+
 /** Search the item on external services (Scholar / Baidu / CNKI). */
 function searchMenuFor(item) {
   const q = encodeURIComponent(item.record?.title || item.title || item.rawValue || '')
-  const sourceUrl = item.record?.url || (item.doi ? `https://doi.org/${item.doi}` : '')
-  const open = (url) => window.open(url, '_blank')
+  const sourceUrl = safeSourceUrl(item)
+  const open = openExternal
   return [
     { label: t('search.scholar'), onClick: () => open(`https://scholar.google.com/scholar?q=${q}`) },
     { label: t('search.baidu'), onClick: () => open(`https://xueshu.baidu.com/s?wd=${q}`) },
@@ -116,11 +135,11 @@ function ItemCard({ item, selectMode, selected, onToggleSelect, onContextMenu })
     // always surface the sign-in / manual-download path — paywalls, 403s and
     // institutional-only books all end up here and all need the same rescue.
     const code = item.error?.code
-    const sourceUrl = item.record?.url || (item.doi ? `https://doi.org/${item.doi}` : '')
+    const sourceUrl = safeSourceUrl(item)
     if (sourceUrl) {
       const loginish = code === 'paywalled' || code === 'needs_login'
       actions.push(
-        h(Button, { key: 'login', onClick: () => window.open(sourceUrl, '_blank') }, loginish ? t('action.openLoginPage') : t('action.openSource')),
+        h(Button, { key: 'login', onClick: () => openExternal(sourceUrl) }, loginish ? t('action.openLoginPage') : t('action.openSource')),
         h(ImportPdfButton, { key: 'import', item }),
       )
     }
@@ -144,7 +163,7 @@ function ItemCard({ item, selectMode, selected, onToggleSelect, onContextMenu })
     }
     if (item.saveMode === 'zotero' && item.zotero?.key) {
       actions.push(
-        h(Button, { key: 'zotero', onClick: () => window.open(`zotero://select/library/items/${item.zotero.key}`, '_blank') }, t('action.openInZotero')),
+        h(Button, { key: 'zotero', onClick: () => openExternal(`zotero://select/library/items/${item.zotero.key}`) }, t('action.openInZotero')),
       )
     }
   }
@@ -262,7 +281,7 @@ function ItemCard({ item, selectMode, selected, onToggleSelect, onContextMenu })
 function CandidateList() {
   const state = useStore()
   const q = state.searchQuery ?? ''
-  const open = (url) => window.open(url, '_blank')
+  const open = openExternal
   const ext = [
     { label: t('search.scholar'), onClick: () => open(`https://scholar.google.com/scholar?q=${encodeURIComponent(q)}`) },
     { label: t('search.baidu'), onClick: () => open(`https://xueshu.baidu.com/s?wd=${encodeURIComponent(q)}`) },

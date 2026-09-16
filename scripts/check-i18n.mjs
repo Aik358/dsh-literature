@@ -68,7 +68,15 @@ check('pinned en yields en strings', i18n.t('close'), 'Close')
 i18n.setPreference('klingon')
 check('unknown preference falls back to auto', i18n.getPreference(), 'auto')
 i18n.setHostLocale(null)
-check('no host + auto -> zh default', i18n.currentLocale(), 'zh')
+check('no host + auto -> en default (no CJK browser)', i18n.currentLocale(), 'en')
+
+// The host's snapshot shape is { active, locales, revision } — detectLocale
+// must read `active` (this is what made an English client show Chinese).
+check('detectLocale reads snapshot.active (en)', i18n.detectLocale({ locale: { snapshot: () => ({ active: 'en', revision: 1 }) } }), 'en')
+check('detectLocale reads snapshot.active (zh)', i18n.detectLocale({ locale: { snapshot: () => ({ active: 'zh', revision: 1 }) } }), 'zh')
+check('detectLocale still accepts legacy snapshot.language', i18n.detectLocale({ locale: { snapshot: () => ({ language: 'en-US' }) } }), 'en')
+check('detectLocale returns null on unknown shape', i18n.detectLocale({ locale: { snapshot: () => ({}) } }), null)
+check('detectLocale tolerates a missing locale service', i18n.detectLocale({}), null)
 
 // The new language settings strings must exist in both tables.
 i18n.setPreference('zh')

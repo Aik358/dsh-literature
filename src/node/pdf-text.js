@@ -59,6 +59,9 @@ export async function extractPdfText(pdfPath, { maxChars = DEFAULT_MAX_CHARS, fo
   }
 
   const text = chunks.join('\n').trim()
+  // Bounded LRU-ish cache: entries are only ever checked for TTL on read, so
+  // without eviction the map would grow forever across distinct PDFs.
+  if (cache.size >= 24) cache.delete(cache.keys().next().value)
   cache.set(pdfPath, { text, at: Date.now() })
   return text
 }

@@ -29,8 +29,8 @@ function textResult(value) {
  * turn. They appear when the user opens the panel or sends a clearly
  * literature-flavoured message, then retire after an idle timeout.
  */
-function toolDefs() {
-  return [lookupTool(), searchTool(), getTool(), citeTool(), noteTool(), statusTool(), saveTool(), figureTool(), deepreadTool(), profileTool()]
+function toolDefs(ctx) {
+  return [lookupTool(), searchTool(), getTool(), citeTool(), noteTool(), statusTool(), saveTool(), figureTool(ctx), deepreadTool(), profileTool()]
 }
 
 export function registerTools(ctx) {
@@ -39,7 +39,7 @@ export function registerTools(ctx) {
   return {
     mount() {
       if (mounted.length) return
-      mounted = toolDefs().map((def) => {
+      mounted = toolDefs(ctx).map((def) => {
         try {
           return ctx.tools.register(def)
         } catch (e) {
@@ -47,7 +47,7 @@ export function registerTools(ctx) {
           return null
         }
       })
-      log(`tools mounted: ${toolDefs().map((d) => d.name).join(', ')}`)
+      log(`tools mounted: ${toolDefs(ctx).map((d) => d.name).join(', ')}`)
     },
     unmount() {
       if (!mounted.length) return
@@ -271,7 +271,7 @@ function statusTool() {
         .sort((a, b) => Number(b.createdAt ?? 0) - Number(a.createdAt ?? 0))
         .slice(0, 5)
         .map((i) => `- ${i.record?.title ?? i.title ?? i.display ?? '(无标题)'} [key=${i.key}]`)
-      const running = (await store.listTasks()).filter((t) => t.status === 'running')
+      const running = (await store.listTasks()).filter((t) => t.state === 'running')
       return [
         `条目总数：${items.length}`,
         `状态分布：${Object.entries(byState).map(([k, v]) => `${k}=${v}`).join(', ') || '—'}`,
@@ -287,7 +287,7 @@ function statusTool() {
  * the PNG into the current conversation as text + image blocks. Only runs
  * when the user asks for a figure — never proactively.
  */
-function figureTool() {
+function figureTool(ctx) {
   const CHART_TYPES = new Set(['bar', 'line', 'pie'])
   return {
     name: 'literature_figure',

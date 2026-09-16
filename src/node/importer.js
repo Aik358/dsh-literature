@@ -9,6 +9,7 @@ import * as sse from './sse.js'
 import { buildItem, titleFingerprint } from './extract/dedupe.js'
 import { resolveIdentifier } from './metadata/index.js'
 import { searchItems, getItemChildren, getFileBuffer } from './zotero/local-api.js'
+import { sanitizeHttpUrl } from './net.js'
 import { log, warn } from './log.js'
 
 /**
@@ -58,8 +59,11 @@ async function savePdfBuffer(key, buffer) {
  * Files are tracked by absolute path so re-runs only pick up new files.
  */
 export async function importDir(dir, { autoResolve = true } = {}) {
-  const target = resolve(dir || '')
-  if (!target) throw Object.assign(new Error('未配置导入文件夹'), { code: 'no_dir' })
+  // Check the RAW string before resolve(): resolve('') is the process CWD —
+  // an unconfigured importDir must not scan the host's working directory.
+  const rawDir = String(dir ?? '').trim()
+  if (!rawDir) throw Object.assign(new Error('未配置导入文件夹'), { code: 'no_dir' })
+  const target = resolve(rawDir)
   let files
   try {
     files = await readdir(target)
@@ -178,7 +182,7 @@ export function zoteroItemToRecord(it) {
     pages: d.pages ?? '',
     doi: d.DOI ?? '',
     isbn: d.ISBN ?? '',
-    url: d.url ?? '',
+    url: sanitizeHttpUrl(d.url),
     abstract: d.abstractNote ?? '',
   }
 }

@@ -21,9 +21,72 @@ const CD_SIG = 0x02014b50
 const LOCAL_SIG = 0x04034b50
 
 /**
+ * Per-entry and total inflation budgets. A zip member can declare a tiny
+ * compressed size yet inflate to gigabytes (zip bomb) — and this parser runs
+ * inside the shared DSH host process, where a synchronous unbounded inflate
+ * would both freeze the event loop and exhaust memory. Media parts (the bulk
+ * of a real deck) are never read as text, and the lazy map below only inflates
+ * what is actually requested.
+ */
+const MAX_INFLATED_PER_ENTRY = 16 * 1024 * 1024
+const MAX_INFLATED_TOTAL = 64 * 1024 * 1024
+
+/**
+ * Lazy, budgeted view over the central directory: entries inflate on first
+ * read, each capped by maxOutputLength, with a shared total budget across the
+ * archive. Interface matches the old Map usage (has/keys/get), where get()
+ * returns null for a corrupt or over-budget member — same as before.
+ */
+class LazyZipEntries {
+  constructor(records) {
+    this.records = records
+    this.totalInflated = 0
+  }
+
+  has(name) {
+    return this.records.has(name)
+  }
+
+  keys() {
+    return this.records.keys()
+  }
+
+  get(name) {
+    const rec = this.records.get(name)
+    if (!rec) return undefined
+    if (rec.data) return rec.data
+    if (rec.failed) return null
+    const budget = Math.min(MAX_INFLATED_PER_ENTRY, MAX_INFLATED_TOTAL - this.totalInflated)
+    if (budget <= 0) {
+      rec.failed = true
+      return null
+    }
+    try {
+      const data =
+        rec.method === 0
+          ? rec.raw.length <= budget
+            ? rec.raw
+            : null
+          : inflateRawSync(rec.raw, { maxOutputLength: budget })
+      if (!data || this.totalInflated + data.length > MAX_INFLATED_TOTAL) {
+        rec.failed = true
+        return null
+      }
+      this.totalInflated += data.length
+      rec.data = data
+      rec.raw = null
+      return data
+    } catch {
+      rec.failed = true // a corrupt member must not kill the whole deck
+      return null
+    }
+  }
+}
+
+/**
  * Minimal zip reader: walk the central directory, then inflate each entry
- * from its local header. Handles stored (method 0) and deflate (method 8) —
- * which is all Office ever writes.
+ * lazily from its local header. Handles stored (method 0) and deflate
+ * (method 8) — which is all Office ever writes.
  */
 function readZipEntries(bytes) {
   // Locate the End Of Central Directory record (it may be followed by a
@@ -39,7 +102,7 @@ function readZipEntries(bytes) {
 
   const count = bytes.readUInt16LE(eocd + 10)
   let off = bytes.readUInt32LE(eocd + 16)
-  const entries = new Map()
+  const records = new Map()
 
   for (let i = 0; i < count; i += 1) {
     if (bytes.readUInt32LE(off) !== CD_SIG) break
@@ -58,17 +121,11 @@ function readZipEntries(bytes) {
       const lExtraLen = bytes.readUInt16LE(localOff + 28)
       const dataStart = localOff + 30 + lNameLen + lExtraLen
       const raw = bytes.slice(dataStart, dataStart + compSize)
-      let data
-      try {
-        data = method === 0 ? Buffer.from(raw) : inflateRawSync(raw)
-      } catch {
-        data = null // a corrupt member must not kill the whole deck
-      }
-      entries.set(name, data)
+      records.set(name, { method, raw, data: null, failed: false })
     }
     off += 46 + nameLen + extraLen + commentLen
   }
-  return entries
+  return new LazyZipEntries(records)
 }
 
 /** Extract the text of every <a:p> paragraph from a slide XML part. */

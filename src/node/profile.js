@@ -13,7 +13,7 @@
  *   user memory only when the user asks for it.
  */
 
-import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, rename } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { STORE_DIR } from './config.js'
 
@@ -54,8 +54,12 @@ async function load() {
 }
 
 async function persist() {
+  // Atomic write (tmp + rename) so a crash mid-write can't truncate the file —
+  // a truncated profile currently self-heals to EMPTY, losing the picture.
   await mkdir(dirname(PROFILE_PATH), { recursive: true })
-  await writeFile(PROFILE_PATH, JSON.stringify(state, null, 2), 'utf8')
+  const tmp = `${PROFILE_PATH}.tmp`
+  await writeFile(tmp, JSON.stringify(state, null, 2), 'utf8')
+  await rename(tmp, PROFILE_PATH)
 }
 
 function schedulePersist() {

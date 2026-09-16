@@ -69,9 +69,15 @@ const DEFAULTS = {
   customSources: [],
 }
 
+// Config keys that must never survive a merge: assigning them (even as own
+// properties via JSON bodies) swaps object prototypes or smuggles junk into
+// the persisted config file.
+const BLOCKED_MERGE_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
+
 function merge(base, patch) {
   const out = { ...base }
   for (const [k, v] of Object.entries(patch ?? {})) {
+    if (BLOCKED_MERGE_KEYS.has(k)) continue
     if (v && typeof v === 'object' && !Array.isArray(v) && typeof base[k] === 'object' && base[k] !== null && !Array.isArray(base[k])) {
       out[k] = merge(base[k], v)
     } else if (v !== undefined) {

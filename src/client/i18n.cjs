@@ -576,7 +576,7 @@ const en = {
 
 const TABLES = { zh, en }
 
-let currentLocale = 'zh'
+let currentLocale = browserLocale() || 'en'
 const listeners = new Set()
 
 /** User preference from the settings page: 'auto' | 'zh' | 'en'. */
@@ -592,11 +592,28 @@ let hostLocale = null
 function detectLocale(ctx) {
   try {
     const snap = ctx?.locale?.snapshot?.()
-    const code = snap?.locale ?? snap?.language ?? ''
+    // The host's snapshot shape is { active, locales, revision } — `active` is
+    // the resolved locale id ("en", "zh", ...). `locale`/`language` are kept
+    // for runtimes that expose those field names instead.
+    const code = snap?.active ?? snap?.locale ?? snap?.language ?? ''
     if (/^en/i.test(code)) return 'en'
     if (/^zh/i.test(code)) return 'zh'
   } catch {
     /* runtime without locale service */
+  }
+  return null
+}
+
+/** Browser language, used when the host exposes no usable locale. */
+function browserLocale() {
+  try {
+    const code = String(
+      (typeof navigator !== 'undefined' && (navigator.language || navigator.userLanguage)) || '',
+    )
+    if (/^zh/i.test(code)) return 'zh'
+    if (/^en/i.test(code)) return 'en'
+  } catch {
+    /* no navigator */
   }
   return null
 }
@@ -650,7 +667,7 @@ function setHostLocale(locale) {
 
 function resolveLocale() {
   if (TABLES[preference]) return preference
-  return hostLocale || 'zh'
+  return hostLocale || browserLocale() || 'en'
 }
 
 function getPreference() {

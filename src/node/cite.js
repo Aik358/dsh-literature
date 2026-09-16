@@ -232,11 +232,14 @@ function chicago(record) {
 
 
 /** BibTeX value escaping: braces wrap every value, so only the characters
- *  BibTeX treats specially inside a field need backslash-escaping. */
+ *  BibTeX treats specially inside a field need backslash-escaping. Braces in
+ *  the value itself are escaped too — an unescaped } would close the field
+ *  wrapper early and corrupt the .bib entry. */
 function bibtexEscape(value) {
   return String(value ?? '')
     .replace(/[\r\n]+/g, ' ')
     .replace(/\\/g, '\\\\')
+    .replace(/([{}])/g, '\\$1')
     .replace(/[&%#$~^_]/g, (ch) => '\\' + ch)
     .trim()
 }
